@@ -420,105 +420,98 @@ def aba_visao_geral(df, periodo_key):
     elif periodo_key == "ultimos6":
         df = df.tail(6)
 
-    # KPIs
-    c1, c2, c3 = st.columns(3)
-    c1.metric("🕵️ Marcações de Fraude",    f"{df['QtdeUsuarioscommarcacoesdefraude'].sum():,}")
-    c2.metric("💰 Recuperado pelo MED",     f"R$ {df['ValorPixdevolvidosintegralmente'].sum():,.0f}")
-    c3.metric("⚠️ Perda Residual",          f"R$ {df['ValorPixresidualnaodevolvido'].sum():,.0f}")
+    st.markdown("### Insight 1: Taxa de Eficácia das Contestações de Fraude")
+    qtde_contestados = df['QtdePixcontestados'].sum()
+    qtde_aceitas = df['Qtdecontestacoesaceitas'].sum()
+    taxa_aceite_med = (qtde_aceitas / qtde_contestados) * 100 if qtde_contestados > 0 else 0
+
+    st.metric("Taxa de Eficácia (Aceites)", f"{taxa_aceite_med:.1f}%", help="Contestações aceitas / Contestações totais")
+
+    if taxa_aceite_med < 40:
+        st.warning(f"🚨 Alerta Risco: A taxa de aceite das contestações de fraude está baixa ({taxa_aceite_med:.1f}%). Verifique o rigor na triagem.")
+
+    fig_eficacia = go.Figure(data=[
+        go.Bar(name='Rejeitadas', x=df['AnoMes'].astype(str), y=df['Qtdecontestacoesrejeitadas'], marker_color='#E57373'),
+        go.Bar(name='Aceitas', x=df['AnoMes'].astype(str), y=df['Qtdecontestacoesaceitas'], marker_color='#81C784')
+    ])
+    fig_eficacia.update_layout(barmode='stack', title="Volume de Contestações: Aceitas vs Rejeitadas", **PLOTLY_DARK)
+    st.plotly_chart(style_fig(fig_eficacia), use_container_width=True)
 
     st.divider()
+    st.markdown("### Insight 2: Saturação de Marcação de Fraude (Chaves vs Usuários)")
+    fig_marcacao = go.Figure()
+    fig_marcacao.add_trace(go.Scatter(x=df['AnoMes'].astype(str), y=df['QtdeChavesPixcommarcacoesdefraude'], mode='lines+markers', name='Chaves com Fraude', line=dict(color='#FFCA28')))
+    fig_marcacao.add_trace(go.Scatter(x=df['AnoMes'].astype(str), y=df['QtdeUsuarioscommarcacoesdefraude'], mode='lines+markers', name='Usuários com Fraude', line=dict(color='#BA68C8')))
+    fig_marcacao.update_layout(title="Evolução: Marcação de Fraude na DICT", **PLOTLY_DARK)
+    st.plotly_chart(style_fig(fig_marcacao), use_container_width=True)
 
-    # Gráfico de área: evolução temporal
-    fig_ev = px.area(
-        df, x="MesesFormatados",
-        y=["QtdePixcontestados", "Qtdecontestacoesaceitas"],
-        title="Evolução: Pix Contestados vs Devoluções Aceitas",
-        labels={"value": "Volume", "variable": "Métrica", "MesesFormatados": ""},
-        color_discrete_sequence=["#38bdf8", "#8b5cf6"],
+    st.divider()
+    st.markdown("### Insight 3: Conversão do Bloqueio Cautelar")
+    fig_cautelar = px.pie(
+        names=['Liberados ao Cliente', 'Devolvidos à Origem'],
+        values=[df['ValorPixbloqueadoscautelarmenteeliberados'].sum(), df['ValorPixbloqueadoscautelarmenteedevolvidos'].sum()],
+        title='Destino dos Recursos em Bloqueio Cautelar',
+        color_discrete_sequence=['#4DD0E1', '#E57373'],
+        hole=0.6
     )
-    style_fig(fig_ev)
-
-    # Gráfico pizza: motivos de não devolução (último mês)
-    ultimo = df.iloc[-1]
-    fig_pie = px.pie(
-        names=["Saldo Insuficiente", "Conta Encerrada", "Outros"],
-        values=[
-            ultimo.get("ValorPixnaodevolvidossaldoinsuficiente", 0),
-            ultimo.get("Valornaodevolvidoscontaencerrada", 0),
-            ultimo.get("ValorPixnaodevolvidosmotivosdiversos", 0),
-        ],
-        hole=0.5,
-        title=f"Por que não devolvido? ({ultimo['MesesFormatados']})",
-        color_discrete_sequence=["#f43f5e", "#f59e0b", "#10b981"],
-    )
-    style_fig(fig_pie, hovermode=False)
-
-    col_a, col_b = st.columns([2, 1])
-    col_a.plotly_chart(fig_ev,  use_container_width=True)
-    col_b.plotly_chart(fig_pie, use_container_width=True)
+    st.plotly_chart(style_fig(fig_cautelar), use_container_width=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ABA 2: CONTESTAÇÕES vs DEVOLUÇÕES
 # ─────────────────────────────────────────────────────────────────────────────
-def aba_contestacoes(df, periodo_key):
-    if df.empty:
+def aba_contestacoes(df_med, periodo_key):
+    if df_med.empty:
         st.warning("Sem dados de fraudes disponíveis.")
         return
 
     if periodo_key == "ultimos3":
-        df = df.tail(3)
+        df_med = df_med.tail(3)
     elif periodo_key == "ultimos6":
-        df = df.tail(6)
+        df_med = df_med.tail(6)
 
-    # Colunas flexíveis
-    col_int = next(
-        (c for c in ["QuantidadedevolvidaintegralmentepormeiodoMED", "QtdePixdevolvidosintegralmente"] if c in df.columns),
-        None,
-    )
-    col_par = next(
-        (c for c in ["QuantidadedevolvidaparcialmentepormeiodoMED", "QtdePixdevolvidosparcialmente"] if c in df.columns),
-        None,
-    )
+    st.markdown("### Insight 1: Taxa Real de Recuperação (Percentual de Devolução)")
+    media_devolucao = df_med['PercentualdeDevolucao'].mean() if len(df_med) > 0 else 0
+    st.metric("Taxa Média de Devolução", f"{media_devolucao:.2f}%")
 
-    df = df.copy()
-    df["TotalDevolvido"] = (df[col_int] if col_int else 0) + (df[col_par] if col_par else 0)
-    df["TaxaSucesso"]    = (df["TotalDevolvido"] / df["QtdePixcontestados"]) * 100
+    if media_devolucao < 5.0 and len(df_med) > 0:
+        st.error(f"⚠️ Atenção Crítica: Sucesso de devolução está em {media_devolucao:.2f}%. Contas laranjas estão esvaziando o saldo antes da atuação do banco recebedor.")
 
-    total_cont = df["QtdePixcontestados"].sum()
-    total_dev  = df["TotalDevolvido"].sum()
-
-    c1, c2, c3 = st.columns(3)
-    c1.metric("📢 Total Contestações",    f"{total_cont:,}")
-    c2.metric("🤝 Total Devolvido (Qtd)", f"{total_dev:,}")
-    c3.metric("📊 Taxa de Sucesso Média", f"{(total_dev/total_cont*100):.2f}%")
+    fig_devolucaotaxa = px.line(df_med, x='MesesFormatados', y='PercentualdeDevolucao', title='Evolução % do Valor Devolvido vs Contestação Aceita', markers=True, color_discrete_sequence=['#00E676'])
+    fig_devolucaotaxa.update_layout(**PLOTLY_DARK, yaxis_title="% Devolvido")
+    st.plotly_chart(style_fig(fig_devolucaotaxa), use_container_width=True)
 
     st.divider()
+    st.markdown("### Insight 2: Motivos de Frustração da Devolução")
+    valores_frustrados = {
+        'Saldo Insuficiente': df_med['ValorPixnaodevolvidossaldoinsuficiente'].sum(),
+        'Conta Encerrada': df_med['Valornaodevolvidoscontaencerrada'].sum(),
+        'Motivos Diversos': df_med['ValorPixnaodevolvidosmotivosdiversos'].sum()
+    }
+    df_frustrado = pd.DataFrame(list(valores_frustrados.items()), columns=['Motivo', 'Valor (R$)'])
+    fig_motivos = px.bar(df_frustrado, x='Valor (R$)', y='Motivo', orientation='h', title='Rastreio da Perda: Razões para Não Devolução do MED', color='Motivo', color_discrete_sequence=['#FF8A65', '#9575CD', '#90A4AE'])
+    fig_motivos.update_layout(**PLOTLY_DARK, showlegend=False)
+    st.plotly_chart(style_fig(fig_motivos), use_container_width=True)
 
-    fig = make_subplots(specs=[[{"secondary_y": True}]])
-    fig.add_trace(go.Bar(x=df["MesesFormatados"], y=df["QtdePixcontestados"], name="Contestações",      marker_color="#f43f5e", opacity=0.85), secondary_y=False)
-    fig.add_trace(go.Bar(x=df["MesesFormatados"], y=df["TotalDevolvido"],     name="Devoluções",        marker_color="#10b981", opacity=0.85), secondary_y=False)
-    fig.add_trace(go.Scatter(x=df["MesesFormatados"], y=df["TaxaSucesso"], name="Taxa Devolução (%)",
-                             mode="lines+markers", line=dict(color="#38bdf8", width=3), marker=dict(size=8, symbol="diamond")), secondary_y=True)
-
-    fig.update_layout(**{**PLOTLY_DARK, "title_text": "Volume Mensal: Contestações vs Devoluções Efetivas", "barmode": "group"})
-    fig.update_xaxes(showgrid=False)
-    fig.update_yaxes(title_text="Qtd", gridcolor="rgba(255,255,255,0.05)", secondary_y=False)
-    fig.update_yaxes(title_text="Taxa %", showgrid=False, secondary_y=True)
-
-    st.plotly_chart(fig, use_container_width=True)
+    st.divider()
+    st.markdown("### Insight 3: Qualidade da Recuperação (Total vs Parcial)")
+    fig_recup = go.Figure(data=[
+        go.Bar(name='Devolvido Integralmente', x=df_med['MesesFormatados'], y=df_med['ValorPixdevolvidosintegralmente'], marker_color='#64B5F6'),
+        go.Bar(name='Devolvido Parcialmente', x=df_med['MesesFormatados'], y=df_med['ValorPixdevolvidosparcialmente'], marker_color='#FFB74D')
+    ])
+    fig_recup.update_layout(barmode='group', title='Qualidade Financeira da Devolução (Integral x Parcial)', **PLOTLY_DARK)
+    st.plotly_chart(style_fig(fig_recup), use_container_width=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ABA 3: ESTATÍSTICAS SISTÊMICAS PIX
 # ─────────────────────────────────────────────────────────────────────────────
-def aba_estatisticas(df_t, sel_pfpj, sel_reg):
-    if df_t.empty:
+def aba_estatisticas(df_sistemico, sel_pfpj, sel_reg):
+    if df_sistemico.empty:
         st.warning("Execute `exemplos/07_estatisticas_pix.py` para gerar os dados de transações.")
         return
 
-    # Aplica filtros
-    df = df_t.copy()
+    df = df_sistemico.copy()
     if sel_pfpj != "Todos" and "PAG_PFPJ" in df.columns:
         df = df[df["PAG_PFPJ"] == sel_pfpj]
     if sel_reg != "Todas" and "PAG_REGIAO" in df.columns:
@@ -527,71 +520,33 @@ def aba_estatisticas(df_t, sel_pfpj, sel_reg):
     if df.empty:
         st.info("Nenhum dado para os filtros selecionados.")
         return
+        
+    df_sistemico = df
 
-    # Período coberto
-    periodo = ", ".join(sorted(str(m)[:4] + "-" + str(m)[4:] for m in df["AnoMes"].unique())) if "AnoMes" in df.columns else "N/A"
-
-    total_qtd    = df["QUANTIDADE"].sum()   if "QUANTIDADE" in df.columns else 0
-    total_valor  = df["VALOR"].sum()        if "VALOR"      in df.columns else 0
-    ticket_medio = total_valor / total_qtd  if total_qtd > 0 else 0
-
-    c1, c2, c3 = st.columns(3)
-    c1.metric("📦 Qtd Total Transações", f"{total_qtd:,.0f}",    delta=f"Período: {periodo}")
-    c2.metric("💵 Volume Financeiro",    f"R$ {total_valor/1e12:.2f} tri")
-    c3.metric("🧾 Ticket Médio",         f"R$ {ticket_medio:,.2f}")
+    st.markdown("### Insight 1: Ticket Médio P2P vs P2B (PF/PJ)")
+    fig_tm_pf_pj = px.box(df_sistemico, x='PAG_PFPJ', y='VALOR', color='REC_PFPJ', title='Dispersão do Ticket Médio por Relação Pagador -> Recebedor', template='plotly_dark')
+    fig_tm_pf_pj.update_layout(**PLOTLY_DARK)
+    fig_tm_pf_pj.update_yaxes(type='log')
+    st.plotly_chart(style_fig(fig_tm_pf_pj), use_container_width=True)
 
     st.divider()
+    st.markdown("### Insight 2: Acessibilidade e Iniciação (Forma da Transação)")
+    if 'FORMAINICIACAO' in df_sistemico.columns:
+        df_iniciacao = df_sistemico.groupby('FORMAINICIACAO', as_index=False)['QUANTIDADE'].sum()
+        df_iniciacao = df_iniciacao[df_iniciacao['FORMAINICIACAO'].astype(str).str.strip().str.lower() != "nao disponivel"]
+        fig_iniciacao = px.treemap(df_iniciacao, path=['FORMAINICIACAO'], values='QUANTIDADE', title='Métodos de Iniciação do Pix (Distribuição de Volume)', color='QUANTIDADE', color_continuous_scale='Teal')
+        fig_iniciacao.update_layout(**PLOTLY_DARK)
+        st.plotly_chart(style_fig(fig_iniciacao), use_container_width=True)
 
-    col_a, col_b = st.columns(2)
-
-    # Gráfico 1: por TIPO
-    with col_a:
-        if "TIPO" in df.columns:
-            df_tipo = df.groupby("TIPO", as_index=False)[["QUANTIDADE", "VALOR"]].sum().sort_values("QUANTIDADE", ascending=False)
-            fig_tipo = px.bar(df_tipo, x="TIPO", y="QUANTIDADE", title="Volume por Tipo de Transação",
-                              color="TIPO", color_discrete_sequence=px.colors.qualitative.Bold, text_auto=".2s")
-            style_fig(fig_tipo, showlegend=False)
-            st.plotly_chart(fig_tipo, use_container_width=True)
-
-    # Gráfico 2: treemap por Região
-    with col_b:
-        if "PAG_REGIAO" in df.columns:
-            df_reg = df.groupby("PAG_REGIAO", as_index=False)[["QUANTIDADE", "VALOR"]].sum()
-            df_reg = df_reg[df_reg["PAG_REGIAO"].str.strip().str.lower() != "nao disponivel"]
-            fig_reg = px.treemap(df_reg, path=["PAG_REGIAO"], values="VALOR",
-                                 title="Volume Financeiro por Região (Pagador)",
-                                 color="VALOR", color_continuous_scale="Tealgrn")
-            fig_reg.update_layout(**{**PLOTLY_DARK, "hovermode": False, "margin": dict(t=50, l=10, r=10, b=10), "coloraxis_showscale": False})
-
-            st.plotly_chart(fig_reg, use_container_width=True)
-
-    # Gráfico 3: PF vs PJ
-    if "PAG_PFPJ" in df.columns and "REC_PFPJ" in df.columns:
-        df_pag  = df.groupby("PAG_PFPJ", as_index=False)[["QUANTIDADE"]].sum().rename(columns={"PAG_PFPJ": "PFPJ", "QUANTIDADE": "Pagador"})
-        df_rec  = df.groupby("REC_PFPJ", as_index=False)[["QUANTIDADE"]].sum().rename(columns={"REC_PFPJ": "PFPJ", "QUANTIDADE": "Recebedor"})
-        df_pfpj = pd.merge(df_pag, df_rec, on="PFPJ", how="outer").fillna(0)
-        df_pfpj = df_pfpj[df_pfpj["PFPJ"].str.strip().str.lower() != "nao disponivel"]
-
-        fig_pfpj = go.Figure([
-            go.Bar(name="Pagador",    x=df_pfpj["PFPJ"], y=df_pfpj["Pagador"],    marker_color="#38bdf8"),
-            go.Bar(name="Recebedor",  x=df_pfpj["PFPJ"], y=df_pfpj["Recebedor"],  marker_color="#a78bfa"),
-        ])
-        fig_pfpj.update_layout(**{**PLOTLY_DARK, "title": "Comparativo PF vs PJ: Pagador e Recebedor", "barmode": "group"})
-        fig_pfpj.update_xaxes(showgrid=False)
-        fig_pfpj.update_yaxes(gridcolor="rgba(255,255,255,0.05)")
-        st.plotly_chart(fig_pfpj, use_container_width=True)
-
-    # Gráfico 4: Finalidade (se disponível)
-    if "FINALIDADE" in df.columns:
-        df_fin = df.groupby("FINALIDADE", as_index=False)[["QUANTIDADE", "VALOR"]].sum()
-        df_fin = df_fin[df_fin["FINALIDADE"].str.strip().str.lower() != "nao disponivel"]
-        df_fin = df_fin.sort_values("VALOR", ascending=False)
-        fig_fin = px.bar(df_fin, x="FINALIDADE", y="VALOR",
-                         title="Volume Financeiro por Finalidade",
-                         color="FINALIDADE", color_discrete_sequence=px.colors.qualitative.Pastel,
-                         text_auto=".2s")
-        style_fig(fig_fin, showlegend=False)
-        st.plotly_chart(fig_fin, use_container_width=True)
+    st.divider()
+    st.markdown("### Insight 3: Perfil Demográfico x Volume Financeiro (Idade)")
+    if 'PAG_IDADE' in df_sistemico.columns:
+        df_idade = df_sistemico.groupby('PAG_IDADE', as_index=False).agg({'VALOR':'sum', 'QUANTIDADE':'sum'})
+        df_idade = df_idade[df_idade['PAG_IDADE'].astype(str).str.strip().str.lower() != "nao disponivel"]
+        df_idade['Ticket_Medio'] = df_idade.apply(lambda row: row['VALOR'] / row['QUANTIDADE'] if row['QUANTIDADE'] > 0 else 0, axis=1)
+        fig_idade = px.bar(df_idade, x='PAG_IDADE', y='Ticket_Medio', title='Ticket Médio Pix por Faixa Etária do Pagador', color='Ticket_Medio', color_continuous_scale='Purples')
+        fig_idade.update_layout(**PLOTLY_DARK, xaxis_title='Faixa Etária', yaxis_title='Ticket Médio (R$)')
+        st.plotly_chart(style_fig(fig_idade), use_container_width=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -619,127 +574,40 @@ def aba_municipios(sel_uf, sel_metrica, sel_fluxo):
             st.cache_data.clear()
             st.rerun()
 
-    df_mun = load_dados_municipios()
+    df_municipios = load_dados_municipios()
 
-    if df_mun.empty:
+    if df_municipios.empty:
         st.error("Não foi possível carregar os dados municipais. Verifique sua conexão com a internet.")
         return
 
-    # Determina coluna de métrica e fluxo
-    fluxo_col_map = {
-        "Total":        {"Valor (R$)": "VALOR_TOTAL",    "Quantidade": "QT_TOTAL"},
-        "Pagador PF":   {"Valor (R$)": "VL_PagadorPF",  "Quantidade": "QT_PagadorPF"},
-        "Pagador PJ":   {"Valor (R$)": "VL_PagadorPJ",  "Quantidade": "QT_PagadorPJ"},
-        "Recebedor PF": {"Valor (R$)": "VL_RecebedorPF","Quantidade": "QT_RecebedorPF"},
-        "Recebedor PJ": {"Valor (R$)": "VL_RecebedorPJ","Quantidade": "QT_RecebedorPJ"},
-    }
-    metrica_col = fluxo_col_map.get(sel_fluxo, {}).get(sel_metrica, "VALOR_TOTAL")
-    if metrica_col not in df_mun.columns:
-        metrica_col = "VALOR_TOTAL"
+    st.markdown("### Insight 1: Concentração e Dispersão Econômica Regional (Top 15 Nacional)")
+    if 'VALOR_TOTAL' in df_municipios.columns:
+        cidade_pico = df_municipios.sort_values(by='VALOR_TOTAL', ascending=False).iloc[0]
+        st.info(f"📍 **Pólo Diário:** {cidade_pico.get('Municipio', '')} - {cidade_pico.get('Estado', '')} movimentou R$ {cidade_pico.get('VALOR_TOTAL', 0)/1e9:,.2f} bi no total.")
 
-    label_metrica = sel_metrica
+        top_15_cidades = df_municipios.groupby(['Municipio', 'Estado'], as_index=False)['VALOR_TOTAL'].sum().nlargest(15, 'VALOR_TOTAL')
+        top_15_cidades['Local'] = top_15_cidades['Municipio'] + " - " + top_15_cidades['Estado']
 
-    # ── KPIs Nacionais ─────────────────────────────────────────────────────
-    total_nacional = df_mun[metrica_col].sum() if metrica_col in df_mun.columns else 0
-    n_estados      = df_mun["Estado"].nunique()  if "Estado"    in df_mun.columns else 0
-    n_municipios   = df_mun["Municipio"].nunique() if "Municipio" in df_mun.columns else 0
-
-    c1, c2, c3 = st.columns(3)
-    c1.metric("🌎 Total Nacional",   f"R$ {total_nacional/1e9:.1f} bi" if "Valor" in sel_metrica else f"{total_nacional:,.0f}")
-    c2.metric("🏛️ Estados cobertos", str(n_estados))
-    c3.metric("🏙️ Municípios",       str(n_municipios))
+        fig_top_mun = px.bar(top_15_cidades, x='VALOR_TOTAL', y='Local', orientation='h', title='Top 15 Municípios por Fluxo de Caixa (Valor Recebido/Enviado)', color='VALOR_TOTAL', color_continuous_scale='Viridis')
+        fig_top_mun.update_layout(yaxis={'categoryorder':'total ascending'}, **PLOTLY_DARK)
+        st.plotly_chart(style_fig(fig_top_mun), use_container_width=True)
 
     st.divider()
-
-    # ── Mapa Choropleth por Estado ──────────────────────────────────────────
-    geojson = _load_geojson()
-    if "Estado" in df_mun.columns and geojson:
-        df_estado = df_mun.groupby("Estado", as_index=False)[[metrica_col]].sum()
-
-        fig_mapa = px.choropleth_mapbox(
-            df_estado,
-            geojson=geojson,
-            locations="Estado",
-            featureidkey="properties.sigla",
-            color=metrica_col,
-            color_continuous_scale="Viridis",
-            mapbox_style="carto-darkmatter",
-            zoom=3.5,
-            center={"lat": -15.78, "lon": -47.93},
-            opacity=0.75,
-            labels={metrica_col: label_metrica},
-            title=f"Distribuição por Estado — {sel_fluxo} ({sel_metrica})",
-        )
-        fig_mapa.update_layout(
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0)",
-            font_color="#f8fafc",
-            font_family="Outfit",
-            margin={"r": 0, "t": 45, "l": 0, "b": 0},
-            coloraxis_colorbar=dict(title=label_metrica),
-        )
-        st.plotly_chart(fig_mapa, use_container_width=True)
-    else:
-        st.warning("GeoJSON não disponível. Mapa não pôde ser renderizado.")
+    st.markdown("### Insight 2: Análise de Capilaridade P2B Municipal")
+    if 'QT_RecebedorPJ' in df_municipios.columns and 'VL_RecebedorPJ' in df_municipios.columns:
+        fig_p2b = px.scatter(df_municipios, x='QT_RecebedorPJ', y='VL_RecebedorPJ', size='QT_PES_RecebedorPJ', color='Regiao', hover_name='Municipio', title='Concentração Empresarial: Qtd Transações x Volume PJ', log_x=True, log_y=True)
+        fig_p2b.update_layout(**PLOTLY_DARK)
+        st.plotly_chart(style_fig(fig_p2b), use_container_width=True)
 
     st.divider()
-
-    # ── Gráfico de barras: Top 20 Municípios do estado selecionado ──────────
-    st.markdown(f"### 🏙️ Top 20 Municípios — **{sel_uf}**")
-
-    filtro_buscador = st.text_input("🔍 Buscar município", placeholder="Ex: São Paulo", key="busca_mun")
-
-    if "Estado" in df_mun.columns and "Municipio" in df_mun.columns:
-        df_uf = df_mun[df_mun["Estado"] == sel_uf].copy()
-
-        if filtro_buscador:
-            df_uf = df_uf[df_uf["Municipio"].str.contains(filtro_buscador, case=False, na=False)]
-
-        df_top = (
-            df_uf.groupby("Municipio", as_index=False)[[metrica_col]].sum()
-            .sort_values(metrica_col, ascending=False)
-            .head(20)
-        )
-
-        if df_top.empty:
-            st.info(f"Nenhum município encontrado para '{sel_uf}'" + (f" com filtro '{filtro_buscador}'" if filtro_buscador else "") + ".")
-        else:
-            fig_bar = px.bar(
-                df_top,
-                x=metrica_col,
-                y="Municipio",
-                orientation="h",
-                title=f"Top 20 — {sel_uf} | {sel_fluxo} | {sel_metrica}",
-                color=metrica_col,
-                color_continuous_scale="Blues",
-                labels={metrica_col: label_metrica, "Municipio": ""},
-                text_auto=".2s",
-            )
-            fig_bar.update_layout(**{
-                **PLOTLY_DARK,
-                "hovermode": False,
-                "coloraxis_showscale": False,
-                "yaxis": {"categoryorder": "total ascending"},
-                "margin": {"t": 50, "b": 20, "l": 140, "r": 20},
-            })
-            fig_bar.update_xaxes(showgrid=False)
-            fig_bar.update_yaxes(showgrid=False)
-            st.plotly_chart(fig_bar, use_container_width=True)
-
-    # ── Tabela detalhada ────────────────────────────────────────────────────
-    with st.expander("📋 Ver tabela completa de municípios"):
-        if "Estado" in df_mun.columns:
-            df_tabela = df_mun[df_mun["Estado"] == sel_uf].copy()
-            if filtro_buscador:
-                df_tabela = df_tabela[df_tabela["Municipio"].str.contains(filtro_buscador, case=False, na=False)]
-
-            cols_show = [c for c in ["Municipio", "Estado", "VALOR_TOTAL", "QT_TOTAL",
-                                      "VL_PagadorPF", "VL_PagadorPJ", "VL_RecebedorPF", "VL_RecebedorPJ"] if c in df_tabela.columns]
-            st.dataframe(
-                df_tabela[cols_show].sort_values(metrica_col, ascending=False).reset_index(drop=True),
-                use_container_width=True,
-                height=350,
-            )
+    st.markdown("### Insight 3: Participação PF x PJ no Volume Recebido")
+    if 'VL_RecebedorPF' in df_municipios.columns and 'VL_RecebedorPJ' in df_municipios.columns:
+        df_mun_clean = df_municipios[(df_municipios['VL_RecebedorPF'] > 0) | (df_municipios['VL_RecebedorPJ'] > 0)].copy()
+        df_mun_clean['Share_Rec_PF'] = df_mun_clean['VL_RecebedorPF'] / (df_mun_clean['VL_RecebedorPF'] + df_mun_clean['VL_RecebedorPJ'])
+        top_informalidade = df_mun_clean.sort_values(by='Share_Rec_PF', ascending=False).head(10)
+        fig_share_pf = px.bar(top_informalidade, x='Share_Rec_PF', y='Municipio', orientation='h', title='Taxa de Informalidade: Proporção do R$ Recebido em Contas PF vs PJ', color='Regiao', labels={'Share_Rec_PF': '% Volume Recebido (PF)', 'Municipio': 'Cidade'})
+        fig_share_pf.update_layout(xaxis_tickformat='.1%', yaxis={'categoryorder':'total ascending'}, **PLOTLY_DARK)
+        st.plotly_chart(style_fig(fig_share_pf), use_container_width=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
