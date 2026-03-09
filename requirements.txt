@@ -6,4 +6,7 @@ statsmodels
 matplotlib
 seaborn
 scikit-learn
-
+streamlit
+plotly
+prophet
+python-dateutil
