@@ -17,8 +17,6 @@ from plotly.subplots import make_subplots
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 
-import modulo_auth
-
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIGURAÇÃO DA PÁGINA
 # ─────────────────────────────────────────────────────────────────────────────
@@ -231,6 +229,13 @@ def load_dados_fraudes():
     df = pd.read_json(arquivos[-1])
     if not df.empty and "AnoMes" in df.columns:
         df = df.sort_values("AnoMes")
+        # --- LIMPEZA DE DADOS: Fraudes ---
+        df = df.dropna(subset=["QtdePixcontestados", "AnoMes"])          # remove linhas críticas nulas
+        df = df[df["QtdePixcontestados"] >= 0]                           # remove valores negativos impossíveis
+        df = df.drop_duplicates(subset=["AnoMes"])                       # remove meses duplicados
+        if "PercentualdeDevolucao" in df.columns:
+            df["PercentualdeDevolucao"] = df["PercentualdeDevolucao"].clip(0, 100)  # % não pode passar de 100
+        # ---------------------------------
         df["MesesFormatados"] = (
             df["AnoMes"].astype(str).str[:4] + "-" + df["AnoMes"].astype(str).str[4:]
         )
@@ -324,6 +329,13 @@ def _fetch_municipios_api(meses_voltar: int = 6) -> pd.DataFrame:
         return pd.DataFrame()
 
     df = pd.DataFrame(todos)
+
+    # --- LIMPEZA DE DADOS: Municípios ---
+    if "Municipio" in df.columns and "Estado" in df.columns:
+        df = df.dropna(subset=["Municipio", "Estado"])       # remove municípios sem nome
+        df["Municipio"] = df["Municipio"].str.strip().str.title()  # padroniza capitalização
+    # -------------------------------------
+
     for c in ["VL_PagadorPF", "VL_PagadorPJ", "VL_RecebedorPF", "VL_RecebedorPJ"]:
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0)
@@ -334,78 +346,13 @@ def _fetch_municipios_api(meses_voltar: int = 6) -> pd.DataFrame:
     df["VALOR_TOTAL"] = df[["VL_PagadorPF", "VL_PagadorPJ", "VL_RecebedorPF", "VL_RecebedorPJ"]].sum(axis=1)
     df["QT_TOTAL"]    = df[["QT_PagadorPF", "QT_PagadorPJ", "QT_RecebedorPF", "QT_RecebedorPJ"]].sum(axis=1)
 
+    # Remove valores negativos indicando anomalias no município
+    df = df[df["VALOR_TOTAL"] >= 0]
+
     os.makedirs(DADOS_DIR, exist_ok=True)
     df.to_json(os.path.join(DADOS_DIR, "pix_regional_cache.json"), orient="records", indent=2)
     return df
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# AUTENTICAÇÃO
-# ─────────────────────────────────────────────────────────────────────────────
-def tela_login():
-    if os.path.exists("capa_login.png"):
-        import base64
-        with open("capa_login.png", "rb") as img_file:
-            b64_str = base64.b64encode(img_file.read()).decode("utf-8")
-        html_img = f'<div style="text-align: center; margin-bottom: 20px;"><img src="data:image/png;base64,{b64_str}" style="max-width: 100%; width: 350px; border-radius: 8px;"></div>'
-        st.markdown(html_img, unsafe_allow_html=True)
-    st.markdown("## 🔐 Acesso Restrito")
-    st.caption("Painel de Estatísticas do Sistema Pix — BCB")
-    st.divider()
-
-    email = st.text_input("📧 E-mail corporativo", key="login_email")
-    senha = st.text_input("🔒 Senha", type="password", key="login_senha")
-
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("Entrar no Painel", use_container_width=True):
-            if not email or not senha:
-                st.error("Preencha e-mail e senha.")
-            else:
-                ok, msg = modulo_auth.verificar_login(email, senha)
-                if ok:
-                    st.session_state["autenticado"] = True
-                    st.session_state["email"] = email
-                    st.rerun()
-                else:
-                    st.error(msg)
-    with col2:
-        if st.button("Solicitar Acesso", use_container_width=True):
-            st.session_state["tela"] = "registro"
-            st.rerun()
-
-def tela_registro():
-    if os.path.exists("capa_login.png"):
-        import base64
-        with open("capa_login.png", "rb") as img_file:
-            b64_str = base64.b64encode(img_file.read()).decode("utf-8")
-        html_img = f'<div style="text-align: center; margin-bottom: 20px;"><img src="data:image/png;base64,{b64_str}" style="max-width: 100%; width: 350px; border-radius: 8px;"></div>'
-        st.markdown(html_img, unsafe_allow_html=True)
-    st.markdown("## 🧑‍💼 Nova Credencial")
-    st.caption("A senha deve ter 8+ chars, maiúscula, minúscula, número e símbolo.")
-    st.divider()
-
-    email = st.text_input("📧 E-mail", key="reg_email")
-    senha = st.text_input("🔑 Criar senha", type="password", key="reg_senha")
-    conf  = st.text_input("✅ Confirmar senha", type="password", key="reg_conf")
-
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("Registrar", use_container_width=True):
-            if not email or not senha or not conf:
-                st.error("Preencha todos os campos.")
-            elif senha != conf:
-                st.error("As senhas não coincidem.")
-            else:
-                ok, msg = modulo_auth.registrar_usuario(email, senha)
-                if ok:
-                    st.success(msg)
-                else:
-                    st.error(msg)
-    with col2:
-        if st.button("← Voltar ao Login", use_container_width=True):
-            st.session_state["tela"] = "login"
-            st.rerun()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SIDEBAR COM FILTROS
@@ -413,7 +360,6 @@ def tela_registro():
 def sidebar_filtros(df_fraudes, df_trans):
     with st.sidebar:
         st.markdown("## 💸 Painel BCB — Pix")
-        st.markdown(f"👤 `{st.session_state.get('email', '')}`")
         st.divider()
 
         # ── Filtros Aba 1 e 2 (fraudes) ─────────────────────────────────────
@@ -451,12 +397,6 @@ def sidebar_filtros(df_fraudes, df_trans):
         sel_uf     = st.selectbox("Estado (UF)", estados_br, index=estados_br.index("SP"), key="f_uf")
         sel_metrica = st.radio("Métrica", ["Valor (R$)", "Quantidade"], horizontal=True, key="f_metrica")
         sel_fluxo  = st.radio("Fluxo", ["Total", "Pagador PF", "Pagador PJ", "Recebedor PF", "Recebedor PJ"], key="f_fluxo")
-
-        st.divider()
-        if st.button("🚪 Encerrar Sessão", use_container_width=True):
-            for k in ["autenticado", "email", "tela"]:
-                st.session_state.pop(k, None)
-            st.rerun()
 
     return periodo_key, sel_pfpj, sel_reg, sel_uf, sel_metrica, sel_fluxo
 
@@ -536,6 +476,17 @@ def aba_contestacoes(df_med, periodo_key):
     elif periodo_key == "ultimos6":
         df_med = df_med.tail(6)
 
+    with st.expander("📖 Dicionário de Dados — o que significa cada campo?"):
+        st.markdown("""
+        | Parâmetro | Descrição |
+        |-----------|-----------|
+        | `PercentualdeDevolucao` | % do valor contestado que foi efetivamente devolvido ao cliente |
+        | `ValorPixdevolvidosintegralmente` | Transações onde 100% do valor foi recuperado |
+        | `ValorPixdevolvidosparcialmente` | Transações onde uma fração do valor original foi recuperada |
+        | `ValorPixnaodevolvidossaldoinsuficiente` | Frustração por falta de fundos na conta de destino |
+        | `Valornaodevolvidoscontaencerrada` | Frustração pois a conta de destino já havia sido encerrada |
+        """)
+
     st.markdown("### Insight 1: Taxa Real de Recuperação (Percentual de Devolução)")
     media_devolucao = df_med['PercentualdeDevolucao'].mean() if len(df_med) > 0 else 0
     st.metric("Taxa Média de Devolução", f"{media_devolucao:.2f}%")
@@ -589,30 +540,206 @@ def aba_estatisticas(df_sistemico, sel_pfpj, sel_reg):
         
     df_sistemico = df
 
+    with st.expander("📖 Dicionário de Dados — o que significa cada campo?"):
+        st.markdown("""
+        | Parâmetro | Descrição |
+        |-----------|-----------|
+        | `VALOR` | Valor financeiro total transacionado na relação selecionada |
+        | `QUANTIDADE` | Número de transações realizadas na relação |
+        | `PAG_PFPJ` / `REC_PFPJ` | Natureza jurídica do pagador / recebedor (PF ou PJ) |
+        | `FORMAINICIACAO` | Método como o Pix foi iniciado (Chave, QR Code, Copia e Cola, etc) |
+        | `PAG_IDADE` | Faixa etária do pagador |
+        """)
+
     st.markdown("### Insight 1: Ticket Médio P2P vs P2B (PF/PJ)")
-    fig_tm_pf_pj = px.box(df_sistemico, x='PAG_PFPJ', y='VALOR', color='REC_PFPJ', title='Dispersão do Ticket Médio por Relação Pagador -> Recebedor', template='plotly_dark')
-    fig_tm_pf_pj.update_layout(**PLOTLY_DARK)
-    fig_tm_pf_pj.update_yaxes(type='log')
-    st.plotly_chart(style_fig(fig_tm_pf_pj), use_container_width=True)
+
+    df_box = df_sistemico.copy()
+    df_box["VALOR"] = pd.to_numeric(df_box["VALOR"], errors="coerce")
+    df_box["QUANTIDADE"] = pd.to_numeric(df_box["QUANTIDADE"], errors="coerce")
+
+    # 1. Remove "Nao disponivel" de ambas as colunas
+    df_box = df_box[
+        ~df_box["PAG_PFPJ"].astype(str).str.strip().str.lower().isin(["nao disponivel", "nan"]) &
+        ~df_box["REC_PFPJ"].astype(str).str.strip().str.lower().isin(["nao disponivel", "nan"])
+    ]
+
+    # Calcula o TICKET MÉDIO real por linha
+    df_box = df_box[df_box["QUANTIDADE"] > 0]
+    df_box["TICKET_MEDIO"] = df_box["VALOR"] / df_box["QUANTIDADE"]
+
+    # Remove tickets absurdos (< R$1 e > p95 por grupo)
+    df_box = df_box[df_box["TICKET_MEDIO"] > 1.0]
+
+    def filtrar_p95(grupo):
+        p95 = grupo["TICKET_MEDIO"].quantile(0.95)
+        return grupo[grupo["TICKET_MEDIO"] <= p95]
+
+    df_box = df_box.groupby(["PAG_PFPJ", "REC_PFPJ"], group_keys=False).apply(filtrar_p95)
+
+    # 2 gráficos lado a lado
+    col1, col2 = st.columns(2)
+    for col, pag_tipo in zip([col1, col2], ["PF", "PJ"]):
+        df_filtrado = df_box[df_box["PAG_PFPJ"] == pag_tipo]
+        fig = px.box(
+            df_filtrado, x="PAG_PFPJ", y="TICKET_MEDIO", color="REC_PFPJ",
+            title=f"Pagador {pag_tipo} → Ticket Médio por Recebedor",
+            template="plotly_dark",
+            labels={"TICKET_MEDIO": "Ticket Médio (R$)"},
+            category_orders={"REC_PFPJ": ["PF", "PJ"]}
+        )
+        fig.update_layout(**PLOTLY_DARK)
+        col.plotly_chart(style_fig(fig), use_container_width=True)
 
     st.divider()
     st.markdown("### Insight 2: Acessibilidade e Iniciação (Forma da Transação)")
     if 'FORMAINICIACAO' in df_sistemico.columns:
         df_iniciacao = df_sistemico.groupby('FORMAINICIACAO', as_index=False)['QUANTIDADE'].sum()
-        df_iniciacao = df_iniciacao[df_iniciacao['FORMAINICIACAO'].astype(str).str.strip().str.lower() != "nao disponivel"]
-        fig_iniciacao = px.treemap(df_iniciacao, path=['FORMAINICIACAO'], values='QUANTIDADE', title='Métodos de Iniciação do Pix (Distribuição de Volume)', color='QUANTIDADE', color_continuous_scale='Teal')
+
+        # Remove inválidos
+        df_iniciacao = df_iniciacao[
+            ~df_iniciacao['FORMAINICIACAO'].astype(str).str.strip().str.lower().isin(
+                ["nao disponivel", "nan", ""]
+            )
+        ]
+
+        # Traduz siglas para nomes legíveis
+        mapa_siglas = {
+            "QRDN": "QR Code Dinâmico",
+            "DICT": "Chave Pix (DICT)",
+            "MANU": "Dados Manuais",
+            "QRES": "QR Code Estático",
+            "INIC": "Iniciação por API",
+            "AGND": "Agendamento",
+        }
+        df_iniciacao['METODO'] = df_iniciacao['FORMAINICIACAO'].map(mapa_siglas).fillna(df_iniciacao['FORMAINICIACAO'])
+
+        # Calcula % de participação
+        total = df_iniciacao['QUANTIDADE'].sum()
+        df_iniciacao['PCT'] = (df_iniciacao['QUANTIDADE'] / total * 100).round(1)
+
+        # Agrupa métodos com menos de 0.5% em "Outros"
+        threshold = total * 0.005
+        df_iniciacao['METODO'] = df_iniciacao.apply(
+            lambda row: row['METODO'] if row['QUANTIDADE'] >= threshold else 'Outros',
+            axis=1
+        )
+        df_iniciacao = df_iniciacao.groupby('METODO', as_index=False).agg(
+            QUANTIDADE=('QUANTIDADE', 'sum')
+        )
+        # Recalcula PCT depois do agrupamento
+        total_final = df_iniciacao['QUANTIDADE'].sum()
+        df_iniciacao['PCT'] = (df_iniciacao['QUANTIDADE'] / total_final * 100).round(2)
+
+        # Donut chart
+        fig_iniciacao = px.pie(
+            df_iniciacao,
+            names='METODO',
+            values='QUANTIDADE',
+            title='Métodos de Iniciação do Pix (Distribuição de Volume)',
+            hole=0.55,
+            color_discrete_sequence=px.colors.qualitative.Bold
+        )
+        fig_iniciacao.update_traces(
+            textposition='outside',
+            textinfo='label+percent',
+            textfont_size=12,
+            pull=[0.03] * len(df_iniciacao)
+        )
         fig_iniciacao.update_layout(**PLOTLY_DARK)
         st.plotly_chart(style_fig(fig_iniciacao), use_container_width=True)
+
+        # Tabela resumo
+        st.markdown("**📋 Detalhamento por método:**")
+        df_tabela = df_iniciacao[['METODO', 'QUANTIDADE', 'PCT']].sort_values('QUANTIDADE', ascending=False)
+        df_tabela.columns = ['Método', 'Qtd Transações', '% do Total']
+        df_tabela['Qtd Transações'] = df_tabela['Qtd Transações'].apply(lambda x: f"{x:,.0f}")
+        df_tabela['% do Total'] = df_tabela['% do Total'].apply(lambda x: f"{x:.2f}%")
+        st.dataframe(df_tabela, use_container_width=True, hide_index=True)
 
     st.divider()
     st.markdown("### Insight 3: Perfil Demográfico x Volume Financeiro (Idade)")
     if 'PAG_IDADE' in df_sistemico.columns:
-        df_idade = df_sistemico.groupby('PAG_IDADE', as_index=False).agg({'VALOR':'sum', 'QUANTIDADE':'sum'})
-        df_idade = df_idade[df_idade['PAG_IDADE'].astype(str).str.strip().str.lower() != "nao disponivel"]
-        df_idade['Ticket_Medio'] = df_idade.apply(lambda row: row['VALOR'] / row['QUANTIDADE'] if row['QUANTIDADE'] > 0 else 0, axis=1)
-        fig_idade = px.bar(df_idade, x='PAG_IDADE', y='Ticket_Medio', title='Ticket Médio Pix por Faixa Etária do Pagador', color='Ticket_Medio', color_continuous_scale='Purples')
-        fig_idade.update_layout(**PLOTLY_DARK, xaxis_title='Faixa Etária', yaxis_title='Ticket Médio (R$)')
+        df_idade = df_sistemico.groupby('PAG_IDADE', as_index=False).agg(
+            VALOR=('VALOR', 'sum'),
+            QUANTIDADE=('QUANTIDADE', 'sum')
+        )
+
+        # Remove categorias inválidas
+        invalidos = ["nao informado", "nao se aplica", "nao disponivel", "nan"]
+        df_idade = df_idade[
+            ~df_idade['PAG_IDADE'].astype(str).str.strip().str.lower().isin(invalidos)
+        ]
+
+        # Ticket médio real
+        df_idade = df_idade[df_idade['QUANTIDADE'] > 0]
+        df_idade['Ticket_Medio'] = df_idade['VALOR'] / df_idade['QUANTIDADE']
+
+        # Ordem cronológica correta
+        ordem_idade = [
+            'até 19 anos', 'entre 20 e 29 anos', 'entre 30 e 39 anos',
+            'entre 40 e 49 anos', 'entre 50 e 59 anos', 'mais de 60 anos'
+        ]
+        df_idade['PAG_IDADE'] = pd.Categorical(
+            df_idade['PAG_IDADE'], categories=ordem_idade, ordered=True
+        )
+        df_idade = df_idade.sort_values('PAG_IDADE')
+
+        # Lollipop chart
+        fig_idade = go.Figure()
+
+        for _, row in df_idade.iterrows():
+            if pd.notna(row['PAG_IDADE']):
+                fig_idade.add_shape(
+                    type="line",
+                    x0=row['PAG_IDADE'], x1=row['PAG_IDADE'],
+                    y0=0, y1=row['Ticket_Medio'],
+                    line=dict(color="#38bdf8", width=2)
+                )
+
+        fig_idade.add_trace(go.Scatter(
+            x=df_idade['PAG_IDADE'],
+            y=df_idade['Ticket_Medio'],
+            mode='markers+text',
+            marker=dict(size=16, color='#38bdf8', line=dict(color='white', width=2)),
+            text=df_idade['Ticket_Medio'].apply(lambda v: f"R$ {v:,.0f}" if pd.notna(v) else ""),
+            textposition='top center',
+            textfont=dict(color='#f8fafc', size=11),
+            name='Ticket Médio'
+        ))
+
+        fig_idade.update_layout(
+            title='Ticket Médio Pix por Faixa Etária do Pagador',
+            xaxis_title='Faixa Etária',
+            yaxis_title='Ticket Médio (R$)',
+            **PLOTLY_DARK
+        )
         st.plotly_chart(style_fig(fig_idade), use_container_width=True)
+
+        # Extrai os tickets reais das faixas para injetar na tabela de interpretação
+        # Caso alguma categoria venha vazia do DF, preenche com 0 visualmente
+        def pega_valor(faixa):
+            try:
+                v = df_idade[df_idade["PAG_IDADE"] == faixa]["Ticket_Medio"].values[0]
+                return f"R$ {v:,.0f}" if pd.notna(v) else "Indisponível"
+            except IndexError:
+                return "Indisponível"
+
+        st.markdown(
+            f"""
+            **📊 Insights do perfil demográfico x ticket médio:**
+            
+            Notamos uma tendência de crescimento claro estruturado conforme a maturidade financeira do pagador:
+            
+            | Faixa Etária | Ticket (R$) | Interpretação |
+            | :--- | :--- | :--- |
+            | **até 19 anos** | {pega_valor('até 19 anos')} | Jovens — pequenos pagamentos cotidianos, mesadas, lanches |
+            | **20-29 anos** | {pega_valor('entre 20 e 29 anos')} | Início da vida financeira, divisão de contas, aluguel |
+            | **30-39 anos** | {pega_valor('entre 30 e 39 anos')} | Adultos ativos financeiramente, contas recorrentes |
+            | **40-49 anos** | {pega_valor('entre 40 e 49 anos')} | Pico produtivo da carreira, pagamentos mais elevados |
+            | **50-59 anos** | {pega_valor('entre 50 e 59 anos')} | Maior estabilidade e poder aquisitivo histórico |
+            | **60+ anos** | {pega_valor('mais de 60 anos')} | Maior ticket médio — poupança consolidada, aposentadoria, transações patrimoniais |
+            """
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -626,6 +753,111 @@ def _load_geojson():
     except Exception:
         return None
 
+
+@st.cache_data(show_spinner="Renderizando Insight 1 (Municípios)...")
+def gerar_insight1_mun(df_municipios):
+    if 'VALOR_TOTAL' not in df_municipios.columns:
+        return None, None
+    cidade_pico = df_municipios.sort_values(by='VALOR_TOTAL', ascending=False).iloc[0]
+    
+    top_15_cidades = df_municipios.groupby(['Municipio', 'Estado'], as_index=False)['VALOR_TOTAL'].sum().nlargest(15, 'VALOR_TOTAL')
+    top_15_cidades['Local'] = top_15_cidades['Municipio'] + " - " + top_15_cidades['Estado']
+    
+    fig_top_mun = px.bar(top_15_cidades, x='VALOR_TOTAL', y='Local', orientation='h', title='Top 15 Municípios por Fluxo de Caixa (Valor Recebido/Enviado)', color='VALOR_TOTAL', color_continuous_scale='Viridis')
+    fig_top_mun.update_layout(yaxis={'categoryorder':'total ascending'}, **PLOTLY_DARK)
+    return cidade_pico, style_fig(fig_top_mun)
+
+@st.cache_data(show_spinner="Renderizando Insight 2 (Municípios)...")
+def gerar_insight2_mun(df_municipios):
+    if 'QT_RecebedorPJ' not in df_municipios.columns or 'VL_RecebedorPJ' not in df_municipios.columns:
+        return None
+        
+    df_scatter = df_municipios[
+        ~df_municipios['Regiao'].astype(str).str.strip().str.lower().isin(
+            ["nao informado", "nan", ""]
+        )
+    ].copy()
+
+    fig_scatter = px.scatter(
+        df_scatter,
+        x='QT_RecebedorPJ',
+        y='VL_RecebedorPJ',
+        color='Regiao',
+        size=df_scatter['VL_RecebedorPJ'].apply(
+            lambda x: min(x, df_scatter['VL_RecebedorPJ'].quantile(0.98))
+        ),
+        size_max=12,
+        hover_name='Municipio',
+        log_x=True, log_y=True,
+        title='Concentração Empresarial: Qtd Transações x Volume PJ',
+        template='plotly_dark',
+        opacity=0.6,
+        labels={
+            'QT_RecebedorPJ': 'Qtd Transações PJ',
+            'VL_RecebedorPJ': 'Volume Recebido PJ (R$)',
+            'Regiao': 'Região'
+        }
+    )
+
+    fig_scatter.update_layout(
+        **PLOTLY_DARK,
+        yaxis=dict(
+            type='log',
+            range=[4, 13],
+            autorange=False
+        ),
+        xaxis=dict(
+            type='log',
+            autorange=True
+        )
+    )
+    return style_fig(fig_scatter)
+
+@st.cache_data(show_spinner="Renderizando Insight 3 (Municípios)...")
+def gerar_insight3_mun(df_municipios):
+    if 'VL_RecebedorPF' not in df_municipios.columns or 'VL_RecebedorPJ' not in df_municipios.columns:
+        return None
+        
+    df_pfpj = df_municipios[['Municipio', 'VL_RecebedorPF', 'VL_RecebedorPJ']].copy()
+    df_pfpj = df_pfpj.groupby('Municipio', as_index=False).sum()
+    
+    df_pfpj['TOTAL'] = df_pfpj['VL_RecebedorPF'] + df_pfpj['VL_RecebedorPJ']
+    df_pfpj = df_pfpj[df_pfpj['TOTAL'] > 0]
+    
+    df_pfpj['PCT_PF'] = (df_pfpj['VL_RecebedorPF'] / df_pfpj['TOTAL'] * 100).round(1)
+    df_pfpj['PCT_PJ'] = (df_pfpj['VL_RecebedorPJ'] / df_pfpj['TOTAL'] * 100).round(1)
+    df_pfpj = df_pfpj.nlargest(15, 'TOTAL')
+
+    fig_pfpj = go.Figure()
+    if 'PCT_PF' in df_pfpj.columns:
+        fig_pfpj.add_trace(go.Bar(
+            y=df_pfpj['Municipio'],
+            x=df_pfpj['PCT_PF'],
+            name='PF',
+            orientation='h',
+            marker_color='#6366f1',
+            text=df_pfpj['PCT_PF'].apply(lambda v: f"{v:.1f}%" if v > 5 else ""),
+            textposition='inside'
+        ))
+    if 'PCT_PJ' in df_pfpj.columns:
+        fig_pfpj.add_trace(go.Bar(
+            y=df_pfpj['Municipio'],
+            x=df_pfpj['PCT_PJ'],
+            name='PJ',
+            orientation='h',
+            marker_color='#f97316',
+            text=df_pfpj['PCT_PJ'].apply(lambda v: f"{v:.1f}%" if v > 5 else ""),
+            textposition='inside'
+        ))
+
+    fig_pfpj.update_layout(
+        barmode='stack',
+        title='Top 15 Cidades — Proporção do Volume Recebido PF vs PJ',
+        xaxis=dict(title='% do Volume Recebido', range=[0, 100], ticksuffix='%'),
+        yaxis=dict(title='Cidade', categoryorder='total ascending'),
+        **PLOTLY_DARK
+    )
+    return style_fig(fig_pfpj)
 
 def aba_municipios(sel_uf, sel_metrica, sel_fluxo):
     st.markdown(
@@ -647,33 +879,37 @@ def aba_municipios(sel_uf, sel_metrica, sel_fluxo):
         return
 
     st.markdown("### Insight 1: Concentração e Dispersão Econômica Regional (Top 15 Nacional)")
-    if 'VALOR_TOTAL' in df_municipios.columns:
-        cidade_pico = df_municipios.sort_values(by='VALOR_TOTAL', ascending=False).iloc[0]
+    cidade_pico, fig_top_mun = gerar_insight1_mun(df_municipios)
+    if fig_top_mun:
         st.info(f"📍 **Pólo Diário:** {cidade_pico.get('Municipio', '')} - {cidade_pico.get('Estado', '')} movimentou R$ {cidade_pico.get('VALOR_TOTAL', 0)/1e9:,.2f} bi no total.")
-
-        top_15_cidades = df_municipios.groupby(['Municipio', 'Estado'], as_index=False)['VALOR_TOTAL'].sum().nlargest(15, 'VALOR_TOTAL')
-        top_15_cidades['Local'] = top_15_cidades['Municipio'] + " - " + top_15_cidades['Estado']
-
-        fig_top_mun = px.bar(top_15_cidades, x='VALOR_TOTAL', y='Local', orientation='h', title='Top 15 Municípios por Fluxo de Caixa (Valor Recebido/Enviado)', color='VALOR_TOTAL', color_continuous_scale='Viridis')
-        fig_top_mun.update_layout(yaxis={'categoryorder':'total ascending'}, **PLOTLY_DARK)
-        st.plotly_chart(style_fig(fig_top_mun), use_container_width=True)
+        st.plotly_chart(fig_top_mun, use_container_width=True)
 
     st.divider()
     st.markdown("### Insight 2: Análise de Capilaridade P2B Municipal")
-    if 'QT_RecebedorPJ' in df_municipios.columns and 'VL_RecebedorPJ' in df_municipios.columns:
-        fig_p2b = px.scatter(df_municipios, x='QT_RecebedorPJ', y='VL_RecebedorPJ', size='QT_PES_RecebedorPJ', color='Regiao', hover_name='Municipio', title='Concentração Empresarial: Qtd Transações x Volume PJ', log_x=True, log_y=True)
-        fig_p2b.update_layout(**PLOTLY_DARK)
-        st.plotly_chart(style_fig(fig_p2b), use_container_width=True)
+    fig_scatter = gerar_insight2_mun(df_municipios)
+    if fig_scatter:
+        st.plotly_chart(fig_scatter, use_container_width=True)
+        st.markdown(
+            """
+            **📊 Insights da Análise P2B Municipal:**
+            
+            * **Tendência linear clara (escala log-log)**: Quanto mais transações um município possui, logicamente maior será o volume — atestando forte adoção corporativa do Pix que escala simetricamente.
+            
+            | Região | Posição no Gráfico | Dinâmica Comercial de Recebimento de Pix |
+            | :--- | :--- | :--- |
+            | 🟣 **Sudeste** | Canto superior direito | Francamente domina em escala total (volume multimilionário em massa e número massivo de contas de recebimento PJ). SP sendo o outlier de ouro do bloco. |
+            | 🟠 **Nordeste** | Meio a espalhado pelo gráfico | Expansão formidável da digitalização no recebimento com crescimento acelerado pulverizado entre suas capitais e metrópoles. |
+            | 🟢 **Sul** | Distribuído homogeneamente | Região caracterizada por altíssima capilaridade mercantil. Vários municípios de médio porte com excelentes fluxos médios de capital. |
+            | 🟣 **Centro-Oeste** | Poucos pontos, muito concentrados no topo | Reflexo claro da geografia do Agronegócio e capitais isoladas: baixa densidade demográfica, mas alto poder e volume aquisitivo transacional rodando entre o produtor/PJ e suas cadeias rurais ou na Capital Nacional. |
+            | 🟠 **Norte** | Parte inferior à esquerda / Baixo | Mais focada em polos regionais escassos (Manaus/Pará). Grande massa do território com baixíssima adoção corporativa de pagamentos digitais em comparação com as demais metades do país. |
+            """
+        )
 
     st.divider()
     st.markdown("### Insight 3: Participação PF x PJ no Volume Recebido")
-    if 'VL_RecebedorPF' in df_municipios.columns and 'VL_RecebedorPJ' in df_municipios.columns:
-        df_mun_clean = df_municipios[(df_municipios['VL_RecebedorPF'] > 0) | (df_municipios['VL_RecebedorPJ'] > 0)].copy()
-        df_mun_clean['Share_Rec_PF'] = df_mun_clean['VL_RecebedorPF'] / (df_mun_clean['VL_RecebedorPF'] + df_mun_clean['VL_RecebedorPJ'])
-        top_informalidade = df_mun_clean.sort_values(by='Share_Rec_PF', ascending=False).head(10)
-        fig_share_pf = px.bar(top_informalidade, x='Share_Rec_PF', y='Municipio', orientation='h', title='Taxa de Informalidade: Proporção do R$ Recebido em Contas PF vs PJ', color='Regiao', labels={'Share_Rec_PF': '% Volume Recebido (PF)', 'Municipio': 'Cidade'})
-        fig_share_pf.update_layout(xaxis_tickformat='.1%', yaxis={'categoryorder':'total ascending'}, **PLOTLY_DARK)
-        st.plotly_chart(style_fig(fig_share_pf), use_container_width=True)
+    fig_pfpj = gerar_insight3_mun(df_municipios)
+    if fig_pfpj:
+        st.plotly_chart(fig_pfpj, use_container_width=True)
 
 
 
@@ -699,39 +935,19 @@ def aba_preditiva(df_med):
     st.markdown("### Insight 1: Projeção de Volume de Contestações de Fraude (Próximos 6 meses)")
     
     with st.spinner("Treinando modelo de Inteligência Artificial..."):
-        m = Prophet(seasonality_mode='multiplicative', yearly_seasonality=False, weekly_seasonality=False, daily_seasonality=False)
+        m = Prophet(seasonality_mode='additive', yearly_seasonality=False, weekly_seasonality=False, daily_seasonality=False)
         try:
-            # Aggregate to prevent duplicate ds causing singular matrices, just in case
-            df_grouped = df_prophet.groupby('ds', as_index=False)['y'].sum()
-            m.fit(df_grouped)
-            
-            future = m.make_future_dataframe(periods=6, freq='MS')
-            forecast = m.predict(future)
+            m.fit(df_prophet[['ds', 'y']])
         except Exception as e:
-            # Fallback for synthetic/small data that crashes Prophet's optimization
-            import numpy as np
-            from dateutil.relativedelta import relativedelta
-            
-            df_grouped = df_prophet.groupby('ds', as_index=False)['y'].sum()
-            x_vals = np.arange(len(df_grouped))
-            z = np.polyfit(x_vals, df_grouped['y'], 1)
-            p = np.poly1d(z)
-            
-            future_x = np.arange(len(df_grouped) + 6)
-            future_y = p(future_x)
-            
-            last_date = df_grouped['ds'].max()
-            future_dates = [last_date + relativedelta(months=i) for i in range(1, 7)]
-            all_dates = pd.concat([df_grouped['ds'], pd.Series(future_dates)], ignore_index=True)
-            
-            # Mount a mock prophet-like forecast dataframe
-            forecast = pd.DataFrame({
-                'ds': all_dates,
-                'yhat': future_y,
-                'yhat_lower': future_y * 0.90,
-                'yhat_upper': future_y * 1.10
-            })
-            df_prophet = df_grouped
+            st.error("Não foi possível treinar o modelo preditivo com o volume de dados atual (podem faltar dados ou haver pouca variação).")
+            # Log ou mostre o erro técnico em um expander
+            with st.expander("Detalhes Técnicos do Erro"):
+                st.code(str(e))
+            return
+        
+        # Prever próximos 6 meses
+        future = m.make_future_dataframe(periods=6, freq='MS')
+        forecast = m.predict(future)
 
     # Pegando valor projetado do último mês
     ultimo_mes_projetado = forecast.iloc[-1]
@@ -833,19 +1049,7 @@ def dashboard():
 # ROTEAMENTO PRINCIPAL
 # ─────────────────────────────────────────────────────────────────────────────
 def main():
-    modulo_auth.init_auth()
-
-    if "autenticado" not in st.session_state:
-        st.session_state["autenticado"] = False
-    if "tela" not in st.session_state:
-        st.session_state["tela"] = "login"
-
-    if st.session_state["autenticado"]:
-        dashboard()
-    elif st.session_state["tela"] == "registro":
-        tela_registro()
-    else:
-        tela_login()
+    dashboard()
 
 
 if __name__ == "__main__":
