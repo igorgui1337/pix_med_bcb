@@ -6,7 +6,8 @@ statsmodels
 matplotlib
 seaborn
 scikit-learn
-streamlit
+streamlit>=1.30.0
 plotly
 prophet
 python-dateutil
+altair>=5.0.0
