@@ -223,8 +223,13 @@ DADOS_DIR = os.path.join(BASE_DIR, "dados")
 
 @st.cache_data(show_spinner="Carregando dados de fraudes...")
 def load_dados_fraudes():
-    arquivos = sorted(glob.glob(os.path.join(DADOS_DIR, "fraudes_pix_*.json")))
+    import glob, os
+    padrao1 = os.path.join(DADOS_DIR, "fraudes_pix_*.json")
+    padrao2 = os.path.join(DADOS_DIR, "Fraudes_Pix_*.json")
+    arquivos = sorted(glob.glob(padrao1) + glob.glob(padrao2))
+    
     if not arquivos:
+        st.error(f"Erro: Arquivos 'fraudes' não encontrados no diretório:\n\n`{DADOS_DIR}`\n\nLista de arquivos na pasta atual: {os.listdir(DADOS_DIR) if os.path.exists(DADOS_DIR) else 'pasta inexistente'}")
         return pd.DataFrame()
     df = pd.read_json(arquivos[-1])
     if not df.empty and "AnoMes" in df.columns:
@@ -246,6 +251,7 @@ def load_dados_fraudes():
 def load_dados_transacoes():
     arquivos = sorted(glob.glob(os.path.join(DADOS_DIR, "estatisticas_transacoes_*.json")))
     if not arquivos:
+        st.error(f"Erro: Arquivos 'transações' não encontrados no diretório:\n\n`{DADOS_DIR}`")
         return pd.DataFrame()
     try:
         return pd.read_json(arquivos[-1])
