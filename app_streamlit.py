@@ -500,8 +500,69 @@ def aba_contestacoes(df_med, periodo_key):
     if media_devolucao < 5.0 and len(df_med) > 0:
         st.error(f"⚠️ Atenção Crítica: Sucesso de devolução está em {media_devolucao:.2f}%. Contas laranjas estão esvaziando o saldo antes da atuação do banco recebedor.")
 
-    fig_devolucaotaxa = px.line(df_med, x='MesesFormatados', y='PercentualdeDevolucao', title='Evolução % do Valor Devolvido vs Contestação Aceita', markers=True, color_discrete_sequence=['#00E676'])
-    fig_devolucaotaxa.update_layout(**PLOTLY_DARK, yaxis_title="% Devolvido")
+    fig_devolucaotaxa = px.line(
+        df_med, 
+        x='MesesFormatados', 
+        y='PercentualdeDevolucao',
+        title='Evolução % do Valor Devolvido vs Contestação Aceita',
+        template='plotly_dark',
+        markers=True
+    )
+
+    # Área preenchida + cor da linha
+    fig_devolucaotaxa.update_traces(
+        fill='tozeroy',
+        fillcolor='rgba(0, 255, 136, 0.15)',
+        line=dict(color='#00ff88', width=2),
+        marker=dict(size=5, color='#00ff88')
+    )
+
+    # Linha de média
+    media = df_med['PercentualdeDevolucao'].mean()
+    fig_devolucaotaxa.add_hline(
+        y=media,
+        line_dash='dash',
+        line_color='#facc15',
+        annotation_text=f"Média: {media:.1f}%",
+        annotation_position="top right",
+        annotation_font_color='#facc15'
+    )
+
+    # Annotation no pico (máximo)
+    if not df_med.empty:
+        idx_max = df_med['PercentualdeDevolucao'].idxmax()
+        fig_devolucaotaxa.add_annotation(
+            x=df_med.loc[idx_max, 'MesesFormatados'],
+            y=df_med.loc[idx_max, 'PercentualdeDevolucao'],
+            text=f"⚠️ Pico: {df_med.loc[idx_max, 'PercentualdeDevolucao']:.1f}%",
+            showarrow=True,
+            arrowhead=2,
+            font=dict(color='#f87171', size=11),
+            arrowcolor='#f87171',
+            ay=-40
+        )
+
+        # Annotation no mínimo
+        idx_min = df_med['PercentualdeDevolucao'].idxmin()
+        fig_devolucaotaxa.add_annotation(
+            x=df_med.loc[idx_min, 'MesesFormatados'],
+            y=df_med.loc[idx_min, 'PercentualdeDevolucao'],
+            text=f"📉 Mínimo: {df_med.loc[idx_min, 'PercentualdeDevolucao']:.1f}%",
+            showarrow=True,
+            arrowhead=2,
+            font=dict(color='#60a5fa', size=11),
+            arrowcolor='#60a5fa',
+            ay=40
+        )
+
+    # Renomeia eixos
+    fig_devolucaotaxa.update_layout(
+        **PLOTLY_DARK,
+        xaxis_title="Mês/Ano",
+        yaxis_title="% Devolvido",
+        yaxis=dict(ticksuffix='%')
+    )
+
     st.plotly_chart(style_fig(fig_devolucaotaxa), use_container_width=True)
 
     st.divider()
