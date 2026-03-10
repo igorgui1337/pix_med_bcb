@@ -320,7 +320,10 @@ def _fetch_municipios_api(meses_voltar: int = 6) -> pd.DataFrame:
                 r = requests.get(pg, timeout=60)
                 r.raise_for_status()
                 data = r.json()
-                todos.extend(data.get("value", []))
+                items = data.get("value", [])
+                for item in items:
+                    item["AnoMes"] = anomes
+                todos.extend(items)
                 pg = data.get("@odata.nextLink")
             if todos:
                 meses_ok += 1
@@ -363,7 +366,7 @@ def _fetch_municipios_api(meses_voltar: int = 6) -> pd.DataFrame:
 # ─────────────────────────────────────────────────────────────────────────────
 # SIDEBAR COM FILTROS
 # ─────────────────────────────────────────────────────────────────────────────
-def sidebar_filtros(df_fraudes, df_trans):
+def sidebar_filtros(df_fraudes, df_trans, df_municipios):
     with st.sidebar:
         st.markdown("## 💸 Painel BCB — Pix")
         st.divider()
@@ -397,14 +400,21 @@ def sidebar_filtros(df_fraudes, df_trans):
         # ── Filtros Aba 4 (municípios) ───────────────────────────────────────
         st.markdown("### 🗺️ Municípios")
         estados_br = [
-            "AC","AL","AM","AP","BA","CE","DF","ES","GO","MA","MG","MS","MT",
+            "Todos", "AC","AL","AM","AP","BA","CE","DF","ES","GO","MA","MG","MS","MT",
             "PA","PB","PE","PI","PR","RJ","RN","RO","RR","RS","SC","SE","SP","TO",
         ]
-        sel_uf     = st.selectbox("Estado (UF)", estados_br, index=estados_br.index("SP"), key="f_uf")
+        sel_uf = st.selectbox("Estado (UF)", estados_br, index=estados_br.index("Todos"), key="f_uf")
+        
+        opts_meses = ["Todos (Animação)"]
+        if not df_municipios.empty and 'AnoMes' in df_municipios.columns:
+            meses_disp = sorted(df_municipios['AnoMes'].dropna().astype(str).unique(), reverse=True)
+            opts_meses.extend(meses_disp)
+        sel_mes_mun = st.selectbox("Mês de Referência", opts_meses, key="f_mes_mun")
+
         sel_metrica = st.radio("Métrica", ["Valor (R$)", "Quantidade"], horizontal=True, key="f_metrica")
         sel_fluxo  = st.radio("Fluxo", ["Total", "Pagador PF", "Pagador PJ", "Recebedor PF", "Recebedor PJ"], key="f_fluxo")
 
-    return periodo_key, sel_pfpj, sel_reg, sel_uf, sel_metrica, sel_fluxo
+    return periodo_key, sel_pfpj, sel_reg, sel_uf, sel_mes_mun, sel_metrica, sel_fluxo
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -412,7 +422,10 @@ def sidebar_filtros(df_fraudes, df_trans):
 # ─────────────────────────────────────────────────────────────────────────────
 def style_fig(fig, **kwargs):
     layout = {**PLOTLY_DARK, **kwargs}  # kwargs sobrescreve PLOTLY_DARK em caso de duplicata
-    fig.update_layout(**layout)
+    fig.update_layout(
+        **layout,
+        transition=dict(duration=500, easing="cubic-in-out")
+    )
     fig.update_xaxes(showgrid=False)
     fig.update_yaxes(gridcolor="rgba(255,255,255,0.05)")
     return fig
@@ -455,6 +468,7 @@ def aba_visao_geral(df, periodo_key):
     fig_marcacao.add_trace(go.Scatter(x=df['AnoMes'].astype(str), y=df['QtdeChavesPixcommarcacoesdefraude'], mode='lines+markers', name='Chaves com Fraude', line=dict(color='#FFCA28')))
     fig_marcacao.add_trace(go.Scatter(x=df['AnoMes'].astype(str), y=df['QtdeUsuarioscommarcacoesdefraude'], mode='lines+markers', name='Usuários com Fraude', line=dict(color='#BA68C8')))
     fig_marcacao.update_layout(title="Evolução: Marcação de Fraude na DICT", **PLOTLY_DARK)
+    fig_marcacao.update_xaxes(rangeslider_visible=True)
     st.plotly_chart(style_fig(fig_marcacao), use_container_width=True)
 
     st.divider()
@@ -562,6 +576,7 @@ def aba_contestacoes(df_med, periodo_key):
         yaxis_title="% Devolvido",
         yaxis=dict(ticksuffix='%')
     )
+    fig_devolucaotaxa.update_xaxes(rangeslider_visible=True)
 
     st.plotly_chart(style_fig(fig_devolucaotaxa), use_container_width=True)
 
@@ -960,6 +975,11 @@ def gerar_insight2_mun(df_municipios):
         )
     ].copy()
 
+    anim_kwargs = {}
+    if 'AnoMes' in df_scatter.columns:
+        df_scatter = df_scatter.sort_values(by=['AnoMes', 'Municipio'])
+        anim_kwargs = dict(animation_frame='AnoMes', animation_group='Municipio')
+
     fig_scatter = px.scatter(
         df_scatter,
         x='QT_RecebedorPJ',
@@ -971,14 +991,16 @@ def gerar_insight2_mun(df_municipios):
         size_max=12,
         hover_name='Municipio',
         log_x=True, log_y=True,
-        title='Concentração Empresarial: Qtd Transações x Volume PJ',
+        title='Concentração Empresarial: Qtd Transações x Volume PJ (Animado)',
         template='plotly_dark',
         opacity=0.6,
         labels={
             'QT_RecebedorPJ': 'Qtd Transações PJ',
             'VL_RecebedorPJ': 'Volume Recebido PJ (R$)',
-            'Regiao': 'Região'
-        }
+            'Regiao': 'Região',
+            'AnoMes': 'Período'
+        },
+        **anim_kwargs
     )
 
     fig_scatter.update_layout(
@@ -990,9 +1012,19 @@ def gerar_insight2_mun(df_municipios):
         ),
         xaxis=dict(
             type='log',
-            autorange=True
+            range=[0, 9],
+            autorange=False
         )
     )
+
+    # Ajuste de velocidade da animação
+    if 'AnoMes' in df_scatter.columns and hasattr(fig_scatter.layout, 'updatemenus') and fig_scatter.layout.updatemenus:
+        try:
+            fig_scatter.layout.updatemenus[0].buttons[0].args[1]['frame']['duration'] = 800
+            fig_scatter.layout.updatemenus[0].buttons[0].args[1]['transition']['duration'] = 500
+        except Exception:
+            pass
+
     return style_fig(fig_scatter)
 
 @st.cache_data(show_spinner="Renderizando Insight 3 (Municípios)...")
@@ -1041,7 +1073,7 @@ def gerar_insight3_mun(df_municipios):
     )
     return style_fig(fig_pfpj)
 
-def aba_municipios(sel_uf, sel_metrica, sel_fluxo):
+def aba_municipios(df_municipios, sel_uf, sel_mes_mun, sel_metrica, sel_fluxo):
     st.markdown(
         '<div class="info-box">💡 Os dados são carregados do cache local ou buscados na API Olinda BCB. '
         'Para atualizar, delete <code>dados/pix_regional_cache.json</code> e recarregue a página.</div>',
@@ -1054,21 +1086,31 @@ def aba_municipios(sel_uf, sel_metrica, sel_fluxo):
             st.cache_data.clear()
             st.rerun()
 
-    df_municipios = load_dados_municipios()
-
     if df_municipios.empty:
         st.error("Não foi possível carregar os dados municipais. Verifique sua conexão com a internet.")
         return
 
-    st.markdown("### Insight 1: Concentração e Dispersão Econômica Regional (Top 15 Nacional)")
-    cidade_pico, fig_top_mun = gerar_insight1_mun(df_municipios)
+    # APLICAÇÃO DOS FILTROS
+    df_filtrado = df_municipios.copy()
+    if sel_uf != "Todos":
+        df_filtrado = df_filtrado[df_filtrado['Estado'] == sel_uf]
+        
+    if sel_mes_mun != "Todos (Animação)":
+        df_filtrado = df_filtrado[df_filtrado['AnoMes'].astype(str) == sel_mes_mun]
+
+    if df_filtrado.empty:
+        st.info("Nenhum dado encontrado para os filtros selecionados.")
+        return
+
+    st.markdown(f"### Insight 1: Concentração e Dispersão Econômica Regional ({'Top 15 Nacional' if sel_uf == 'Todos' else 'Top 15 ' + sel_uf})")
+    cidade_pico, fig_top_mun = gerar_insight1_mun(df_filtrado)
     if fig_top_mun:
         st.info(f"📍 **Pólo Diário:** {cidade_pico.get('Municipio', '')} - {cidade_pico.get('Estado', '')} movimentou R$ {cidade_pico.get('VALOR_TOTAL', 0)/1e9:,.2f} bi no total.")
         st.plotly_chart(fig_top_mun, use_container_width=True)
 
     st.divider()
     st.markdown("### Insight 2: Análise de Capilaridade P2B Municipal")
-    fig_scatter = gerar_insight2_mun(df_municipios)
+    fig_scatter = gerar_insight2_mun(df_filtrado)
     if fig_scatter:
         st.plotly_chart(fig_scatter, use_container_width=True)
         st.markdown(
@@ -1089,7 +1131,7 @@ def aba_municipios(sel_uf, sel_metrica, sel_fluxo):
 
     st.divider()
     st.markdown("### Insight 3: Participação PF x PJ no Volume Recebido")
-    fig_pfpj = gerar_insight3_mun(df_municipios)
+    fig_pfpj = gerar_insight3_mun(df_filtrado)
     if fig_pfpj:
         st.plotly_chart(fig_pfpj, use_container_width=True)
 
@@ -1163,6 +1205,7 @@ def aba_preditiva(df_med):
     ))
 
     fig_forecast.update_layout(title='Forecasting de Contestações MED', **PLOTLY_DARK)
+    fig_forecast.update_xaxes(rangeslider_visible=True)
     st.plotly_chart(style_fig(fig_forecast), use_container_width=True)
 
     st.divider()
@@ -1193,8 +1236,9 @@ def aba_preditiva(df_med):
 def dashboard():
     df_fraudes = load_dados_fraudes()
     df_trans   = load_dados_transacoes()
+    df_municipios = load_dados_municipios()
 
-    periodo_key, sel_pfpj, sel_reg, sel_uf, sel_metrica, sel_fluxo = sidebar_filtros(df_fraudes, df_trans)
+    periodo_key, sel_pfpj, sel_reg, sel_uf, sel_mes_mun, sel_metrica, sel_fluxo = sidebar_filtros(df_fraudes, df_trans, df_municipios)
 
     # Header
     st.markdown(
@@ -1221,7 +1265,7 @@ def dashboard():
     with tab3:
         aba_estatisticas(df_trans, sel_pfpj, sel_reg)
     with tab4:
-        aba_municipios(sel_uf, sel_metrica, sel_fluxo)
+        aba_municipios(df_municipios, sel_uf, sel_mes_mun, sel_metrica, sel_fluxo)
 
     with tab5:
         aba_preditiva(df_fraudes)
