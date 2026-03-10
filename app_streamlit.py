@@ -1173,6 +1173,13 @@ def aba_preditiva(df_med):
         future = m.make_future_dataframe(periods=6, freq='MS')
         forecast = m.predict(future)
 
+        # Calcula MAPE nos dados históricos (acurácia do modelo)
+        df_validacao = forecast[forecast['ds'].isin(df_prophet['ds'])][['ds', 'yhat']].copy()
+        df_validacao = df_validacao.merge(df_prophet[['ds', 'y']], on='ds')
+        df_validacao['erro_pct'] = abs(df_validacao['y'] - df_validacao['yhat']) / df_validacao['y'] * 100
+        mape = df_validacao['erro_pct'].mean()
+        acuracia = max(0, 100 - mape)
+
     # Pegando valor projetado do último mês
     ultimo_mes_projetado = forecast.iloc[-1]
     
@@ -1211,11 +1218,53 @@ def aba_preditiva(df_med):
     st.divider()
 
     st.markdown("### Insight 2: Simulador de Sensibilidade da Eficácia do MED")
+    
+    # ── Card de Métricas do Modelo ──
+    col_m1, col_m2, col_m3 = st.columns(3)
+    col_m1.metric("🤖 Modelo", "Prophet (Meta AI)", help="Modelo de séries temporais aditivo desenvolvido pela Meta")
+    col_m2.metric("📐 Acurácia Histórica", f"{acuracia:.1f}%", help=f"MAPE: {mape:.1f}% — Erro Médio Absoluto Percentual nos dados históricos")
+    col_m3.metric("📅 Horizonte", "6 meses", help="Projeção para os próximos 6 meses a partir do último dado disponível")
+
+    with st.expander("📖 Metodologia Completa — Como a previsão é calculada?"):
+        st.markdown(f"""
+        ### 🔬 Modelo: Prophet (Meta AI / Facebook)
+        
+        | Parâmetro | Valor | Descrição |
+        |---|---|---|
+        | **Modelo** | Prophet | Série temporal aditiva com sazonalidade |
+        | **Sazonalidade** | Aditiva | Componentes somados (não multiplicados) |
+        | **Sazonalidade Anual** | Desativada | Poucos dados históricos disponíveis |
+        | **Sazonalidade Semanal** | Desativada | Dados mensais (não diários) |
+        | **Horizonte de Projeção** | 6 meses | Períodos futuros previstos |
+        | **Métrica de Acurácia** | MAPE | Erro Médio Absoluto Percentual |
+        | **MAPE Calculado** | {mape:.1f}% | Erro médio nas previsões históricas |
+        | **Acurácia Estimada** | {acuracia:.1f}% | 100% - MAPE |
+        
+        ### 📊 Como interpretar o gráfico
+        - 🔵 **Linha azul** = dados reais históricos (MED/BCB)
+        - 🟠 **Linha laranja tracejada** = previsão do modelo
+        - 🟡 **Área sombreada** = cone de incerteza (intervalo de confiança)
+        
+        ### ⚠️ Limitações
+        - Modelo treinado com **{len(df_prophet)} meses** de histórico
+        - Previsões de longo prazo têm **maior margem de erro**
+        - Eventos externos (regulação BCB, crises) **não são capturados** pelo modelo
+        
+        ### 💰 Fórmula do Simulador
+        ```
+        Recuperação = Contestações Previstas × Ticket Médio Real × % Devolução Simulada
+        Ticket Médio Real = Valor Total Contestado ÷ Qtde Contestações (histórico)
+        ```
+        """)
     st.markdown("Simule um cenário futuro ajustando os níveis de recuperação preventiva.")
     
     # Calcular média de devolução
     media_historica_devolucao = df_med['PercentualdeDevolucao'].mean() if len(df_med) > 0 else 5.0
-    ticket_medio_fraude = 850.0 # valor base simulado
+    # Calcular ticket médio REAL calculado dos dados históricos
+    if df_med['QtdePixcontestados'].sum() > 0:
+        ticket_medio_fraude = df_med['ValorPixcontestados'].sum() / df_med['QtdePixcontestados'].sum()
+    else:
+        ticket_medio_fraude = 850.0  # fallback se não houver dados
     
     col1, col2 = st.columns([1, 2])
     with col1:
@@ -1225,9 +1274,13 @@ def aba_preditiva(df_med):
         projecao_financeira = ultimo_mes_projetado['yhat'] * ticket_medio_fraude
         recuperacao_simulada = projecao_financeira * (nova_taxa / 100)
         
+        recuperacao_base = projecao_financeira * (media_historica_devolucao / 100)
+        delta_financeiro = recuperacao_simulada - recuperacao_base
+        delta_str = f"R$ {delta_financeiro:+,.0f} vs cenário base ({nova_taxa - media_historica_devolucao:+.1f} pts %)"
+        
         st.metric(f"💰 Recuperação Financeira Estimada em {ultimo_mes_projetado['ds'].strftime('%b/%Y')}", 
                   f"R$ {recuperacao_simulada:,.0f}", 
-                  delta=f"Melhoria de {(nova_taxa - media_historica_devolucao):+.1f} pts percentuais" if nova_taxa > media_historica_devolucao else "No cenário base")
+                  delta=delta_str)
 
     
 # ─────────────────────────────────────────────────────────────────────────────
