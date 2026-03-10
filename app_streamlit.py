@@ -567,15 +567,66 @@ def aba_contestacoes(df_med, periodo_key):
 
     st.divider()
     st.markdown("### Insight 2: Motivos de Frustração da Devolução")
+
+    # Coleta de dados
     valores_frustrados = {
         'Saldo Insuficiente': df_med['ValorPixnaodevolvidossaldoinsuficiente'].sum(),
-        'Conta Encerrada': df_med['Valornaodevolvidoscontaencerrada'].sum(),
-        'Motivos Diversos': df_med['ValorPixnaodevolvidosmotivosdiversos'].sum()
+        'Conta Encerrada':    df_med['Valornaodevolvidoscontaencerrada'].sum(),
+        'Motivos Diversos':   df_med['ValorPixnaodevolvidosmotivosdiversos'].sum()
     }
-    df_frustrado = pd.DataFrame(list(valores_frustrados.items()), columns=['Motivo', 'Valor (R$)'])
-    fig_motivos = px.bar(df_frustrado, x='Valor (R$)', y='Motivo', orientation='h', title='Rastreio da Perda: Razões para Não Devolução do MED', color='Motivo', color_discrete_sequence=['#FF8A65', '#9575CD', '#90A4AE'])
-    fig_motivos.update_layout(**PLOTLY_DARK, showlegend=False)
-    st.plotly_chart(style_fig(fig_motivos), use_container_width=True)
+    df_frustracao = pd.DataFrame(list(valores_frustrados.items()), columns=['Motivo', 'VALOR'])
+
+    # Calcula % de participação
+    total_frustracao = df_frustracao['VALOR'].sum()
+    if total_frustracao > 0:
+        df_frustracao['PCT'] = (df_frustracao['VALOR'] / total_frustracao * 100).round(1)
+    else:
+        df_frustracao['PCT'] = 0.0
+
+    df_frustracao = df_frustracao.sort_values('VALOR', ascending=True)
+
+    # Cor por gravidade
+    cores = {
+        'Saldo Insuficiente': '#f87171',
+        'Conta Encerrada':    '#fb923c',
+        'Motivos Diversos':   '#94a3b8'
+    }
+    df_frustracao['COR'] = df_frustracao['Motivo'].map(cores).fillna('#94a3b8')
+
+    fig_frust = go.Figure()
+    fig_frust.add_trace(go.Bar(
+        y=df_frustracao['Motivo'],
+        x=df_frustracao['VALOR'],
+        orientation='h',
+        marker_color=df_frustracao['COR'],
+        text=df_frustracao.apply(
+            lambda r: f"R$ {r['VALOR']/1e9:.1f}B  ({r['PCT']:.1f}%)", axis=1
+        ),
+        textposition='outside',
+        textfont=dict(color='white', size=11)
+    ))
+
+    fig_frust.update_layout(
+        title='Rastreio da Perda: Razões para Não Devolução do MED',
+        xaxis_title='Valor (R$)',
+        yaxis_title='Motivo',
+        xaxis=dict(tickprefix='R$ '),
+        **PLOTLY_DARK
+    )
+    st.plotly_chart(style_fig(fig_frust), use_container_width=True)
+
+    # KPI cards abaixo
+    col1, col2, col3 = st.columns(3)
+    for col, (_, row) in zip(
+        [col1, col2, col3],
+        df_frustracao.sort_values('VALOR', ascending=False).iterrows()
+    ):
+        col.metric(
+            label=row['Motivo'],
+            value=f"R$ {row['VALOR']/1e9:.2f}B",
+            delta=f"{row['PCT']:.1f}% do total",
+            delta_color="off"
+        )
 
     st.divider()
     st.markdown("### Insight 3: Qualidade da Recuperação (Total vs Parcial)")
