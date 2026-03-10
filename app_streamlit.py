@@ -1262,7 +1262,7 @@ def aba_preditiva(df_med):
     media_historica_devolucao = df_med['PercentualdeDevolucao'].mean() if len(df_med) > 0 else 5.0
     # Calcular ticket médio REAL calculado dos dados históricos
     if df_med['QtdePixcontestados'].sum() > 0:
-        ticket_medio_fraude = df_med['ValorPixcontestados'].sum() / df_med['QtdePixcontestados'].sum()
+        ticket_medio_fraude = df_med['ValorPixcontestadosaceitos'].sum() / df_med['QtdePixcontestados'].sum()
     else:
         ticket_medio_fraude = 850.0  # fallback se não houver dados
     
