@@ -684,7 +684,6 @@ def aba_contestacoes(df_med, periodo_key):
         )
 
     fig_qual.update_layout(
-        **PLOTLY_DARK,
         title='Qualidade Financeira da Devolução (Integral x Parcial)',
         barmode='group',
         xaxis_title='Mês/Ano',
@@ -697,7 +696,8 @@ def aba_contestacoes(df_med, periodo_key):
             showgrid=False,
             range=[0, 100]
         ),
-        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1)
+        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
+        **PLOTLY_DARK
     )
 
     st.plotly_chart(style_fig(fig_qual), use_container_width=True)
