@@ -463,47 +463,11 @@ def aba_visao_geral(df, periodo_key):
     if taxa_aceite_med < 40:
         st.warning(f"🚨 Alerta Risco: A taxa de aceite das contestações de fraude está baixa ({taxa_aceite_med:.1f}%). Verifique o rigor na triagem.")
 
-    # Transforma para formato longo para animation_frame funcionar
-    df_anim = pd.melt(
-        df[['AnoMes', 'Qtdecontestacoesaceitas', 'Qtdecontestacoesrejeitadas']].copy(),
-        id_vars='AnoMes',
-        value_vars=['Qtdecontestacoesaceitas', 'Qtdecontestacoesrejeitadas'],
-        var_name='Tipo',
-        value_name='Quantidade'
-    )
-    df_anim['Tipo'] = df_anim['Tipo'].map({
-        'Qtdecontestacoesaceitas': 'Aceitas',
-        'Qtdecontestacoesrejeitadas': 'Rejeitadas'
-    })
-    df_anim['AnoMes'] = df_anim['AnoMes'].astype(str)
-
-    # Acumula os frames (cada frame mostra até aquele mês)
-    frames_data = []
-    meses = sorted(df_anim['AnoMes'].unique())
-    for i, mes in enumerate(meses):
-        subset = df_anim[df_anim['AnoMes'].isin(meses[:i+1])]
-        frames_data.append(subset)
-
-    fig_eficacia = px.bar(
-        df_anim,
-        x='AnoMes',
-        y='Quantidade',
-        color='Tipo',
-        barmode='stack',
-        animation_frame='AnoMes',
-        title='Volume de Contestações: Aceitas vs Rejeitadas',
-        color_discrete_map={'Aceitas': '#81C784', 'Rejeitadas': '#E57373'},
-        range_y=[0, df_anim['Quantidade'].sum() * 1.2]
-    )
-    
-    if hasattr(fig_eficacia.layout, 'updatemenus') and fig_eficacia.layout.updatemenus:
-        try:
-            fig_eficacia.layout.updatemenus[0].buttons[0].args[1]['frame']['duration'] = 600
-            fig_eficacia.layout.updatemenus[0].buttons[0].args[1]['transition']['duration'] = 400
-        except Exception:
-            pass
-
-    fig_eficacia.update_layout(**PLOTLY_DARK)
+    fig_eficacia = go.Figure(data=[
+        go.Bar(name='Rejeitadas', x=df['AnoMes'].astype(str), y=df['Qtdecontestacoesrejeitadas'], marker_color='#E57373'),
+        go.Bar(name='Aceitas', x=df['AnoMes'].astype(str), y=df['Qtdecontestacoesaceitas'], marker_color='#81C784')
+    ])
+    fig_eficacia.update_layout(barmode='stack', title="Volume de Contestações: Aceitas vs Rejeitadas", **PLOTLY_DARK)
     st.plotly_chart(style_fig(fig_eficacia), use_container_width=True)
 
     st.divider()
