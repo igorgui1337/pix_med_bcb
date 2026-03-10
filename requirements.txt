@@ -11,3 +11,4 @@ plotly
 prophet
 python-dateutil
 altair>=5.0.0
+streamlit-lottie
