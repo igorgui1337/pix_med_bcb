@@ -630,12 +630,77 @@ def aba_contestacoes(df_med, periodo_key):
 
     st.divider()
     st.markdown("### Insight 3: Qualidade da Recuperação (Total vs Parcial)")
-    fig_recup = go.Figure(data=[
-        go.Bar(name='Devolvido Integralmente', x=df_med['MesesFormatados'], y=df_med['ValorPixdevolvidosintegralmente'], marker_color='#64B5F6'),
-        go.Bar(name='Devolvido Parcialmente', x=df_med['MesesFormatados'], y=df_med['ValorPixdevolvidosparcialmente'], marker_color='#FFB74D')
-    ])
-    fig_recup.update_layout(barmode='group', title='Qualidade Financeira da Devolução (Integral x Parcial)', **PLOTLY_DARK)
-    st.plotly_chart(style_fig(fig_recup), use_container_width=True)
+
+    # Calcula % parcial sobre total devolvido
+    df_med['PCT_PARCIAL'] = (
+        df_med['ValorPixdevolvidosparcialmente'] /
+        (df_med['ValorPixdevolvidosintegralmente'] + df_med['ValorPixdevolvidosparcialmente']) * 100
+    ).round(1)
+
+    fig_qual = go.Figure()
+
+    # Barra — Devolvido Integralmente
+    fig_qual.add_trace(go.Bar(
+        x=df_med['MesesFormatados'],
+        y=df_med['ValorPixdevolvidosintegralmente'],
+        name='Devolvido Integralmente',
+        marker_color='#60a5fa',
+        opacity=0.85
+    ))
+
+    # Barra — Devolvido Parcialmente
+    fig_qual.add_trace(go.Bar(
+        x=df_med['MesesFormatados'],
+        y=df_med['ValorPixdevolvidosparcialmente'],
+        name='Devolvido Parcialmente',
+        marker_color='#fb923c',
+        opacity=0.85
+    ))
+
+    # Linha — % Parcial (eixo secundário)
+    fig_qual.add_trace(go.Scatter(
+        x=df_med['MesesFormatados'],
+        y=df_med['PCT_PARCIAL'],
+        name='% Parcial',
+        mode='lines+markers',
+        line=dict(color='#facc15', width=2, dash='dot'),
+        marker=dict(size=5),
+        yaxis='y2'
+    ))
+
+    # Annotation no pico
+    if not df_med.empty:
+        idx_max = df_med['PCT_PARCIAL'].idxmax()
+        fig_qual.add_annotation(
+            x=df_med.loc[idx_max, 'MesesFormatados'],
+            y=df_med.loc[idx_max, 'PCT_PARCIAL'],
+            text=f"⚠️ Pico Parcial: {df_med.loc[idx_max, 'PCT_PARCIAL']:.1f}%",
+            showarrow=True,
+            arrowhead=2,
+            font=dict(color='#f87171', size=11),
+            arrowcolor='#f87171',
+            yref='y2',
+            ay=-40
+        )
+
+    fig_qual.update_layout(
+        **PLOTLY_DARK,
+        title='Qualidade Financeira da Devolução (Integral x Parcial)',
+        barmode='group',
+        xaxis_title='Mês/Ano',
+        yaxis=dict(title='Valor (R$)'),
+        yaxis2=dict(
+            title='% Parcial',
+            overlaying='y',
+            side='right',
+            ticksuffix='%',
+            showgrid=False,
+            range=[0, 100]
+        ),
+        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1)
+    )
+
+    st.plotly_chart(style_fig(fig_qual), use_container_width=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
