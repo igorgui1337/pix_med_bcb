@@ -16,6 +16,14 @@ from prophet import Prophet
 from plotly.subplots import make_subplots
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
+from streamlit_lottie import st_lottie
+
+def load_lottie(url: str):
+    try:
+        r = requests.get(url, timeout=10)
+        return r.json() if r.status_code == 200 else None
+    except Exception:
+        return None
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIGURAÇÃO DA PÁGINA
@@ -455,11 +463,47 @@ def aba_visao_geral(df, periodo_key):
     if taxa_aceite_med < 40:
         st.warning(f"🚨 Alerta Risco: A taxa de aceite das contestações de fraude está baixa ({taxa_aceite_med:.1f}%). Verifique o rigor na triagem.")
 
-    fig_eficacia = go.Figure(data=[
-        go.Bar(name='Rejeitadas', x=df['AnoMes'].astype(str), y=df['Qtdecontestacoesrejeitadas'], marker_color='#E57373'),
-        go.Bar(name='Aceitas', x=df['AnoMes'].astype(str), y=df['Qtdecontestacoesaceitas'], marker_color='#81C784')
-    ])
-    fig_eficacia.update_layout(barmode='stack', title="Volume de Contestações: Aceitas vs Rejeitadas", **PLOTLY_DARK)
+    # Transforma para formato longo para animation_frame funcionar
+    df_anim = pd.melt(
+        df[['AnoMes', 'Qtdecontestacoesaceitas', 'Qtdecontestacoesrejeitadas']].copy(),
+        id_vars='AnoMes',
+        value_vars=['Qtdecontestacoesaceitas', 'Qtdecontestacoesrejeitadas'],
+        var_name='Tipo',
+        value_name='Quantidade'
+    )
+    df_anim['Tipo'] = df_anim['Tipo'].map({
+        'Qtdecontestacoesaceitas': 'Aceitas',
+        'Qtdecontestacoesrejeitadas': 'Rejeitadas'
+    })
+    df_anim['AnoMes'] = df_anim['AnoMes'].astype(str)
+
+    # Acumula os frames (cada frame mostra até aquele mês)
+    frames_data = []
+    meses = sorted(df_anim['AnoMes'].unique())
+    for i, mes in enumerate(meses):
+        subset = df_anim[df_anim['AnoMes'].isin(meses[:i+1])]
+        frames_data.append(subset)
+
+    fig_eficacia = px.bar(
+        df_anim,
+        x='AnoMes',
+        y='Quantidade',
+        color='Tipo',
+        barmode='stack',
+        animation_frame='AnoMes',
+        title='Volume de Contestações: Aceitas vs Rejeitadas',
+        color_discrete_map={'Aceitas': '#81C784', 'Rejeitadas': '#E57373'},
+        range_y=[0, df_anim['Quantidade'].sum() * 1.2]
+    )
+    
+    if hasattr(fig_eficacia.layout, 'updatemenus') and fig_eficacia.layout.updatemenus:
+        try:
+            fig_eficacia.layout.updatemenus[0].buttons[0].args[1]['frame']['duration'] = 600
+            fig_eficacia.layout.updatemenus[0].buttons[0].args[1]['transition']['duration'] = 400
+        except Exception:
+            pass
+
+    fig_eficacia.update_layout(**PLOTLY_DARK)
     st.plotly_chart(style_fig(fig_eficacia), use_container_width=True)
 
     st.divider()
@@ -514,71 +558,33 @@ def aba_contestacoes(df_med, periodo_key):
     if media_devolucao < 5.0 and len(df_med) > 0:
         st.error(f"⚠️ Atenção Crítica: Sucesso de devolução está em {media_devolucao:.2f}%. Contas laranjas estão esvaziando o saldo antes da atuação do banco recebedor.")
 
-    fig_devolucaotaxa = px.line(
-        df_med, 
-        x='MesesFormatados', 
-        y='PercentualdeDevolucao',
-        title='Evolução % do Valor Devolvido vs Contestação Aceita',
-        template='plotly_dark',
-        markers=True
-    )
+    col_replay, _ = st.columns([1, 3])
+    with col_replay:
+        replay = st.button("▶️ Replay Animado", key="btn_replay_devolucao")
 
-    # Área preenchida + cor da linha
-    fig_devolucaotaxa.update_traces(
-        fill='tozeroy',
-        fillcolor='rgba(0, 255, 136, 0.15)',
-        line=dict(color='#00ff88', width=2),
-        marker=dict(size=5, color='#00ff88')
-    )
+    chart_placeholder = st.empty()
 
-    # Linha de média
-    media = df_med['PercentualdeDevolucao'].mean()
-    fig_devolucaotaxa.add_hline(
-        y=media,
-        line_dash='dash',
-        line_color='#facc15',
-        annotation_text=f"Média: {media:.1f}%",
-        annotation_position="top right",
-        annotation_font_color='#facc15'
-    )
-
-    # Annotation no pico (máximo)
-    if not df_med.empty:
-        idx_max = df_med['PercentualdeDevolucao'].idxmax()
-        fig_devolucaotaxa.add_annotation(
-            x=df_med.loc[idx_max, 'MesesFormatados'],
-            y=df_med.loc[idx_max, 'PercentualdeDevolucao'],
-            text=f"⚠️ Pico: {df_med.loc[idx_max, 'PercentualdeDevolucao']:.1f}%",
-            showarrow=True,
-            arrowhead=2,
-            font=dict(color='#f87171', size=11),
-            arrowcolor='#f87171',
-            ay=-40
+    if replay:
+        import time
+        for i in range(1, len(df_med) + 1):
+            df_slice = df_med.iloc[:i]
+            fig_slice = px.line(
+                df_slice, x='MesesFormatados', y='PercentualdeDevolucao',
+                title='Evolução % do Valor Devolvido vs Contestação Aceita',
+                markers=True, color_discrete_sequence=['#00E676']
+            )
+            fig_slice.update_layout(**PLOTLY_DARK, yaxis_title="% Devolvido",
+                                     yaxis_range=[0, df_med['PercentualdeDevolucao'].max() * 1.2])
+            chart_placeholder.plotly_chart(style_fig(fig_slice), use_container_width=True)
+            time.sleep(0.5)
+    else:
+        fig_devolucaotaxa = px.line(
+            df_med, x='MesesFormatados', y='PercentualdeDevolucao',
+            title='Evolução % do Valor Devolvido vs Contestação Aceita',
+            markers=True, color_discrete_sequence=['#00E676']
         )
-
-        # Annotation no mínimo
-        idx_min = df_med['PercentualdeDevolucao'].idxmin()
-        fig_devolucaotaxa.add_annotation(
-            x=df_med.loc[idx_min, 'MesesFormatados'],
-            y=df_med.loc[idx_min, 'PercentualdeDevolucao'],
-            text=f"📉 Mínimo: {df_med.loc[idx_min, 'PercentualdeDevolucao']:.1f}%",
-            showarrow=True,
-            arrowhead=2,
-            font=dict(color='#60a5fa', size=11),
-            arrowcolor='#60a5fa',
-            ay=40
-        )
-
-    # Renomeia eixos
-    fig_devolucaotaxa.update_layout(
-        **PLOTLY_DARK,
-        xaxis_title="Mês/Ano",
-        yaxis_title="% Devolvido",
-        yaxis=dict(ticksuffix='%')
-    )
-    fig_devolucaotaxa.update_xaxes(rangeslider_visible=True)
-
-    st.plotly_chart(style_fig(fig_devolucaotaxa), use_container_width=True)
+        fig_devolucaotaxa.update_layout(**PLOTLY_DARK, yaxis_title="% Devolvido")
+        chart_placeholder.plotly_chart(style_fig(fig_devolucaotaxa), use_container_width=True)
 
     st.divider()
     st.markdown("### Insight 2: Motivos de Frustração da Devolução")
@@ -1158,16 +1164,32 @@ def aba_preditiva(df_med):
 
     st.markdown("### Insight 1: Projeção de Volume de Contestações de Fraude (Próximos 6 meses)")
     
-    with st.spinner("Treinando modelo de Inteligência Artificial..."):
+    progress_bar = st.progress(0, text="⚙️ Preparando dados históricos...")
+    import time
+
+    progress_bar.progress(15, text="🧹 Limpando e agregando séries temporais...")
+    time.sleep(0.3)
+    progress_bar.progress(35, text="🤖 Inicializando modelo Prophet (Meta AI)...")
+    time.sleep(0.3)
+    progress_bar.progress(55, text="📐 Ajustando sazonalidade e tendência...")
+    time.sleep(0.3)
+    progress_bar.progress(75, text="🔮 Gerando projeções para os próximos 6 meses...")
+
+    with st.spinner(""):
         m = Prophet(seasonality_mode='additive', yearly_seasonality=False, weekly_seasonality=False, daily_seasonality=False)
         try:
             m.fit(df_prophet[['ds', 'y']])
         except Exception as e:
+            progress_bar.empty()
             st.error("Não foi possível treinar o modelo preditivo com o volume de dados atual (podem faltar dados ou haver pouca variação).")
             # Log ou mostre o erro técnico em um expander
             with st.expander("Detalhes Técnicos do Erro"):
                 st.code(str(e))
             return
+            
+        progress_bar.progress(100, text="✅ Modelo treinado com sucesso!")
+        time.sleep(0.4)
+        progress_bar.empty()
         
         # Prever próximos 6 meses
         future = m.make_future_dataframe(periods=6, freq='MS')
@@ -1294,11 +1316,17 @@ def dashboard():
     periodo_key, sel_pfpj, sel_reg, sel_uf, sel_mes_mun, sel_metrica, sel_fluxo = sidebar_filtros(df_fraudes, df_trans, df_municipios)
 
     # Header
-    st.markdown(
-        "<h1 style='margin-bottom:0'>💸 Estatísticas MED / BCB</h1>"
-        "<p style='color:#94a3b8; margin-top:4px'>Painel de monitoramento do Sistema Pix — Banco Central do Brasil</p>",
-        unsafe_allow_html=True,
-    )
+    col_title, col_lottie = st.columns([4, 1])
+    with col_title:
+        st.markdown(
+            "<h1 style='margin-bottom:0'>💸 Estatísticas MED / BCB</h1>"
+            "<p style='color:#94a3b8; margin-top:4px'>Painel de monitoramento do Sistema Pix — Banco Central do Brasil</p>",
+            unsafe_allow_html=True,
+        )
+    with col_lottie:
+        anim = load_lottie("https://assets9.lottiefiles.com/packages/lf20_jcikwtux.json")
+        if anim:
+            st_lottie(anim, height=90, key="header_lottie")
     st.divider()
 
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
